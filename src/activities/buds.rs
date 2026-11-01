@@ -171,9 +171,9 @@ pub fn model_id(f: &Frame) -> Option<u16> {
     (f.id == EXTENDED_STATUS_UPDATED).then(|| f.payload.get(14..16).map(|b| u16::from_le_bytes([b[0], b[1]]))).flatten()
 }
 
-/// The model's name for the log (GalaxyBudsClient's Constants.cs DeviceIds ranges).
-pub fn model_name(id: u16) -> &'static str {
-    match id {
+/// The model's name (GalaxyBudsClient's Constants.cs DeviceIds ranges), when it is one we know.
+fn known_model(id: u16) -> Option<&'static str> {
+    Some(match id {
         279 => "Galaxy Buds Live",
         298 => "Galaxy Buds Pro",
         313..=321 => "Galaxy Buds2",
@@ -185,8 +185,26 @@ pub fn model_name(id: u16) -> &'static str {
         347..=348 => "Galaxy Buds3 FE",
         355..=356 => "Galaxy Buds4",
         359..=361 => "Galaxy Buds4 Pro",
-        _ => crate::i18n::tr("bilinmeyen model"),
-    }
+        _ => return None,
+    })
+}
+
+/// The model's name for the log.
+pub fn model_name(id: u16) -> &'static str {
+    known_model(id).unwrap_or_else(|| crate::i18n::tr("bilinmeyen model"))
+}
+
+/// The connected Buds' model id, as the worker read it (0: not yet).
+static MODEL: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::new(0);
+
+/// The worker saw this model on the connection: the card's title follows it.
+pub fn set_model(id: u16) {
+    MODEL.store(id, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The card's title: the connected Buds' model, or just "Galaxy Buds" before it is known.
+pub fn model_title() -> &'static str {
+    known_model(MODEL.load(std::sync::atomic::Ordering::Relaxed)).unwrap_or("Galaxy Buds")
 }
 
 /// Buds Pro speak the Buds2 protocol on the older serial service: their name (a renamed pair

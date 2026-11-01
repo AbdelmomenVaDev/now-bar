@@ -1638,7 +1638,7 @@ impl Painter<'_, '_> {
         self.ink.rrect(badge, circle / 2.0, rgba(r, g, bl, 1.0))?;
         self.ink.text(&glyph(Icon::Headphones).to_string(), badge, &TextStyle::new(Face::Icons, Weight::Regular, d(24.0), white(1.0)).centered())?;
         let title = TextStyle::new(Face::Text, Weight::SemiBold, d(16.0), white(1.0)).top();
-        self.ink.text("Galaxy Buds2", rect(d(73.0), d(17.0), d(280.0), d(22.0)), &title)?;
+        self.ink.text(crate::activities::buds::model_title(), rect(d(73.0), d(17.0), d(280.0), d(22.0)), &title)?;
         let sub = TextStyle::new(Face::Text, Weight::Regular, d(13.0), white(0.8)).top();
         self.ink.text(tr("Bu bilgisayara bağlı"), rect(d(73.0), d(40.0), d(280.0), d(20.0)), &sub)?;
 

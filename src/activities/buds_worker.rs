@@ -348,6 +348,7 @@ fn read_until_closed(service: &RfcommDeviceService, post: &impl Fn(Option<BudsSn
             }
             if let (None, Some(id)) = (last, model_id(&frame)) {
                 log(&format!("buds: model {id} ({})", model_name(id)));
+                super::buds::set_model(id);
             }
             let next = next_snapshot(&frame, last);
             if let Some(s) = next.filter(|s| last != Some(*s)) {
