@@ -9,7 +9,7 @@ use serde_json::Value;
 
 /// "owner/name" of the repository whose releases are the updates (asked without a token: it
 /// answers once the repository is public); empty: none asked.
-pub const REPO: &str = "nixesty/now-bar";
+pub const REPO: &str = "";
 
 /// The files a release must carry: the two exes and their checksums.
 pub const ASSETS: [&str; 3] = ["nowbar.exe", "nowbar-settings.exe", "SHA256SUMS.txt"];
