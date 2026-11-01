@@ -1,6 +1,6 @@
-//! The interface's language. Every string in the code is Turkish (the source); English comes from
-//! `i18n/en/LC_MESSAGES/nowbar-ui.po`, built into a table at compile time. The settings window's
-//! Slint strings use the same file through Slint's bundled translations.
+//! The interface's language. Every string in the code is Turkish (the source); English and Arabic
+//! come from `i18n/{en,ar}/LC_MESSAGES/nowbar-ui.po`, built into tables at compile time. The
+//! settings window's Slint strings use the same files through Slint's bundled translations.
 
 use std::cell::Cell;
 use std::fmt::Display;
@@ -17,6 +17,7 @@ pub enum Language {
     #[default]
     Turkish,
     English,
+    Arabic,
 }
 
 impl Language {
@@ -25,11 +26,41 @@ impl Language {
         match self {
             Language::Turkish => "tr",
             Language::English => "en",
+            Language::Arabic => "ar",
+        }
+    }
+
+    /// The name Slint's bundled translations go by ("" is the Turkish they're written in).
+    pub fn slint_tag(self) -> &'static str {
+        match self {
+            Language::Turkish => "",
+            Language::English => "en",
+            Language::Arabic => "ar",
+        }
+    }
+
+    fn from_code(code: &str) -> Option<Language> {
+        [Language::Turkish, Language::English, Language::Arabic].into_iter().find(|l| l.code() == code)
+    }
+
+    fn id(self) -> u8 {
+        match self {
+            Language::Turkish => 0,
+            Language::English => 1,
+            Language::Arabic => 2,
+        }
+    }
+
+    fn from_id(id: u8) -> Language {
+        match id {
+            1 => Language::English,
+            2 => Language::Arabic,
+            _ => Language::Turkish,
         }
     }
 }
 
-/// The settings' choice: Windows' own language, or one of the two.
+/// The settings' choice: Windows' own language, or one of the three.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LanguagePick {
@@ -37,6 +68,7 @@ pub enum LanguagePick {
     Auto,
     Turkish,
     English,
+    Arabic,
 }
 
 static LANGUAGE: AtomicU8 = AtomicU8::new(0);
@@ -47,33 +79,33 @@ thread_local! {
 }
 
 include!(concat!(env!("OUT_DIR"), "/en.rs"));
+include!(concat!(env!("OUT_DIR"), "/ar.rs"));
 
 /// The language the interface speaks now.
 pub fn lang() -> Language {
-    OVERRIDE.with(Cell::get).unwrap_or(if LANGUAGE.load(Ordering::Relaxed) == 1 { Language::English } else { Language::Turkish })
+    OVERRIDE.with(Cell::get).unwrap_or_else(|| Language::from_id(LANGUAGE.load(Ordering::Relaxed)))
 }
 
 pub fn set_language(l: Language) {
-    LANGUAGE.store(u8::from(l == Language::English), Ordering::Relaxed);
+    LANGUAGE.store(l.id(), Ordering::Relaxed);
 }
 
-/// The language a setting picks: for `Auto`, Turkish only on a Turkish Windows.
-pub fn pick(p: LanguagePick, windows_turkish: bool) -> Language {
+/// The language a setting picks: for `Auto`, Windows' own when it is Turkish or Arabic, else English.
+pub fn pick(p: LanguagePick, windows: Language) -> Language {
     match p {
         LanguagePick::Turkish => Language::Turkish,
         LanguagePick::English => Language::English,
-        LanguagePick::Auto if windows_turkish => Language::Turkish,
-        LanguagePick::Auto => Language::English,
+        LanguagePick::Arabic => Language::Arabic,
+        LanguagePick::Auto => windows,
     }
 }
 
-/// The language a setting gives on this PC: `NOWBAR_LANG` ("tr" or "en": the dev sheets and the
-/// setup's shots in either language) first, else [`pick`] with Windows' own.
+/// The language a setting gives on this PC: `NOWBAR_LANG` ("tr", "en" or "ar": the dev sheets and
+/// the setup's shots in any language) first, else [`pick`] with Windows' own.
 pub fn chosen(p: LanguagePick) -> Language {
-    match std::env::var("NOWBAR_LANG").as_deref() {
-        Ok("en") => Language::English,
-        Ok("tr") => Language::Turkish,
-        _ => pick(p, windows_is_turkish()),
+    match std::env::var("NOWBAR_LANG").ok().as_deref().and_then(Language::from_code) {
+        Some(l) => l,
+        None => pick(p, windows_language()),
     }
 }
 
@@ -89,23 +121,31 @@ pub fn in_language<R>(l: Language, f: impl FnOnce() -> R) -> R {
     f()
 }
 
-/// `s` in the interface's language: the English for it, or `s` itself (in Turkish, and for a
-/// string the `.po` doesn't have yet).
+/// The translation in `table` (sorted by its Turkish) of the entry `order` puts the key at.
+fn find(table: &'static [(&'static str, &'static str)], order: impl Fn(&str) -> std::cmp::Ordering) -> Option<&'static str> {
+    table.binary_search_by(|(turkish, _)| order(turkish)).ok().map(|i| table[i].1)
+}
+
+/// `s` in the interface's language: its English or Arabic, or `s` itself (in Turkish, and for a
+/// string the `.po` doesn't have yet; an Arabic reader gets the English before the Turkish).
 pub fn tr(s: &str) -> &str {
-    if lang() == Language::Turkish {
-        return s;
+    let order = |k: &str| k.cmp(s);
+    match lang() {
+        Language::Turkish => s,
+        Language::English => find(EN, order).unwrap_or(s),
+        Language::Arabic => find(AR, order).or_else(|| find(EN, order)).unwrap_or(s),
     }
-    EN.binary_search_by(|(turkish, _)| (*turkish).cmp(s)).map_or(s, |i| EN[i].1)
 }
 
 /// `s` in the interface's language where the same Turkish means another thing elsewhere ("Kapalı":
 /// "Off" for a switch, "Overcast" for the sky): the `.po` entry with `ctx` as its msgctxt.
 pub fn trc<'a>(ctx: &str, s: &'a str) -> &'a str {
-    if lang() == Language::Turkish {
-        return s;
+    let order = |k: &str| k.bytes().cmp(ctx.bytes().chain(std::iter::once(4u8)).chain(s.bytes()));
+    match lang() {
+        Language::Turkish => s,
+        Language::English => find(EN, order).unwrap_or(s),
+        Language::Arabic => find(AR, order).or_else(|| find(EN, order)).unwrap_or(s),
     }
-    let key = || ctx.bytes().chain(std::iter::once(4u8)).chain(s.bytes());
-    EN.binary_search_by(|(k, _)| k.bytes().cmp(key())).map_or(s, |i| EN[i].1)
 }
 
 /// `pattern` in the interface's language, its holes filled with `args` (see [`fill`]).
@@ -119,11 +159,11 @@ pub const fn n_(s: &str) -> &str {
     s
 }
 
-/// "%48" in Turkish, "48%" in English.
+/// "%48" in Turkish, "48%" in English and Arabic (which keeps the Latin digits).
 pub fn percent(v: impl Display) -> String {
     match lang() {
         Language::Turkish => format!("%{v}"),
-        Language::English => format!("{v}%"),
+        Language::English | Language::Arabic => format!("{v}%"),
     }
 }
 
@@ -131,7 +171,7 @@ pub fn percent(v: impl Display) -> String {
 pub fn decimal_sep() -> char {
     match lang() {
         Language::Turkish => ',',
-        Language::English => '.',
+        Language::English | Language::Arabic => '.',
     }
 }
 
@@ -140,7 +180,7 @@ pub fn decimal1(v: f64) -> String {
     let s = format!("{v:.1}");
     match lang() {
         Language::Turkish => s.replace('.', ","),
-        Language::English => s,
+        Language::English | Language::Arabic => s,
     }
 }
 
@@ -181,10 +221,14 @@ extern "system" {
     fn GetUserDefaultUILanguage() -> u16;
 }
 
-/// Windows' user interface language is Turkish.
-pub fn windows_is_turkish() -> bool {
-    // LANG_TURKISH in the low 10 bits of the language id.
-    unsafe { GetUserDefaultUILanguage() & 0x3FF == 0x1F }
+/// The interface language Windows' own one gives: Turkish or Arabic, else English.
+pub fn windows_language() -> Language {
+    // The primary language in the low 10 bits of the language id: LANG_TURKISH, LANG_ARABIC.
+    match unsafe { GetUserDefaultUILanguage() } & 0x3FF {
+        0x1F => Language::Turkish,
+        0x01 => Language::Arabic,
+        _ => Language::English,
+    }
 }
 
 #[cfg(test)]
@@ -249,10 +293,14 @@ mod tests {
 
     #[test]
     fn the_language_follows_the_setting_or_windows() {
-        assert_eq!(pick(LanguagePick::Auto, true), Language::Turkish);
-        assert_eq!(pick(LanguagePick::Auto, false), Language::English);
-        assert_eq!(pick(LanguagePick::English, true), Language::English);
-        assert_eq!(pick(LanguagePick::Turkish, false), Language::Turkish);
+        assert_eq!(pick(LanguagePick::Auto, Language::Turkish), Language::Turkish);
+        assert_eq!(pick(LanguagePick::Auto, Language::English), Language::English);
+        assert_eq!(pick(LanguagePick::Auto, Language::Arabic), Language::Arabic);
+        assert_eq!(pick(LanguagePick::English, Language::Turkish), Language::English);
+        assert_eq!(pick(LanguagePick::Turkish, Language::English), Language::Turkish);
+        assert_eq!(pick(LanguagePick::Arabic, Language::English), Language::Arabic);
+        assert_eq!(Language::from_code("ar"), Some(Language::Arabic));
+        assert_eq!(Language::from_code("xx"), None);
     }
 
     /// The string literal starting at `text[at]` (a quote), escapes undone, and where it ends.
@@ -312,25 +360,49 @@ mod tests {
         }
     }
 
-    /// Every string the code puts through `tr`, `trf` or `@tr` has its English in the `.po`
-    /// (`tools/i18n-extract.py` adds the missing ones, empty, to fill in).
+    /// Every string the code puts through `tr`, `trf` or `@tr` has its English and its Arabic in
+    /// the `.po` files (`tools/i18n-extract.py` adds the missing ones, empty, to fill in).
     #[test]
-    fn every_string_has_english() {
+    fn every_string_has_english_and_arabic() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         let mut files = Vec::new();
         for dir in ["src", "ui", "setup/src", "setup/ui"] {
             sources(&root.join(dir), &mut files);
         }
-        let mut missing = Vec::new();
+        let (mut no_english, mut no_arabic) = (Vec::new(), Vec::new());
         for f in files.iter().filter(|f| !f.ends_with("i18n.rs") && !f.ends_with("po.rs")) {
             let text = std::fs::read_to_string(f).unwrap_or_default();
             for s in wrapped(&text) {
+                let at = format!("{}: {s:?}", f.strip_prefix(root).unwrap_or(f).display());
                 if EN.binary_search_by(|(turkish, _)| (*turkish).cmp(s.as_str())).is_err() {
-                    missing.push(format!("{}: {s:?}", f.strip_prefix(root).unwrap_or(f).display()));
+                    no_english.push(at.clone());
+                }
+                if AR.binary_search_by(|(turkish, _)| (*turkish).cmp(s.as_str())).is_err() {
+                    no_arabic.push(at);
                 }
             }
         }
-        assert!(missing.is_empty(), "no English for {} strings (tools/i18n-extract.py):\n{}", missing.len(), missing.join("\n"));
+        assert!(no_english.is_empty(), "no English for {} strings (tools/i18n-extract.py):\n{}", no_english.len(), no_english.join("\n"));
+        assert!(no_arabic.is_empty(), "no Arabic for {} strings (tools/i18n-extract.py):\n{}", no_arabic.len(), no_arabic.join("\n"));
+    }
+
+    /// An Arabic entry keeps the English one's holes (`{}`, `{0}`…), so `fill` has what to fill.
+    #[test]
+    fn arabic_keeps_the_holes_of_the_english() {
+        let holes = |s: &str| {
+            let mut h: Vec<String> = s.match_indices('{').filter_map(|(i, _)| s[i..].find('}').map(|e| s[i..=i + e].to_string())).collect();
+            h.sort();
+            h
+        };
+        let mut wrong = Vec::new();
+        for (key, arabic) in AR {
+            if let Ok(i) = EN.binary_search_by(|(k, _)| (*k).cmp(key)) {
+                if holes(EN[i].1) != holes(arabic) {
+                    wrong.push(format!("{key:?}: {:?} / {arabic:?}", EN[i].1));
+                }
+            }
+        }
+        assert!(wrong.is_empty(), "Arabic holes differ from the English in {} strings:\n{}", wrong.len(), wrong.join("\n"));
     }
 
     #[test]
@@ -345,6 +417,18 @@ mod tests {
     fn numbers_read_the_languages_way() {
         assert_eq!((percent(48), decimal1(1.23)), ("%48".to_string(), "1,2".to_string()));
         in_language(Language::English, || assert_eq!((percent(48), decimal1(1.23)), ("48%".to_string(), "1.2".to_string())));
+        in_language(Language::Arabic, || assert_eq!((percent(48), decimal1(1.23)), ("48%".to_string(), "1.2".to_string())));
+    }
+
+    #[test]
+    fn arabic_speaks_arabic_and_falls_back_to_english() {
+        in_language(Language::Arabic, || {
+            assert_eq!(lang(), Language::Arabic);
+            assert_eq!(tr("Otomatik"), "تلقائي");
+            assert_eq!(trf("{} dk", &[&5]), "5 د");
+            assert_eq!(tr("Bu metin hiç çevrilmedi"), "Bu metin hiç çevrilmedi", "nothing anywhere: the Turkish");
+            assert_ne!(tr("Kapalı"), trc("hava", "Kapalı"), "the same Turkish, two Arabics");
+        });
     }
 
     #[test]

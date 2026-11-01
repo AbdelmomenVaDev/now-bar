@@ -348,6 +348,44 @@ fn color(c: [f32; 4]) -> D2D1_COLOR_F {
     D2D1_COLOR_F { r: c[0], g: c[1], b: c[2], a: c[3] }
 }
 
+fn is_arabic(c: char) -> bool {
+    matches!(c, '\u{0600}'..='\u{06FF}' | '\u{0750}'..='\u{077F}' | '\u{FB50}'..='\u{FDFF}' | '\u{FE70}'..='\u{FEFF}')
+}
+
+/// `s` with each number (`40%`, `37°`, `12:30`, `1.2`, `~20`) set in its own left-to-right embedding when
+/// `s` has Arabic: after an Arabic letter the bidi rules turn digits into Arabic numbers and leave
+/// their `%` or `°` outside the phrase ("40 العلبة%"). Text without Arabic is returned as it is.
+fn isolate_numbers(s: &str) -> std::borrow::Cow<'_, str> {
+    const LRE: char = '\u{202A}';
+    const PDF: char = '\u{202C}';
+    if !s.chars().any(is_arabic) {
+        return s.into();
+    }
+    let chars: Vec<char> = s.chars().collect();
+    let mut out = String::with_capacity(s.len() + 8);
+    let mut i = 0;
+    while i < chars.len() {
+        let sign = matches!(chars[i], '+' | '~') && chars.get(i + 1).is_some_and(char::is_ascii_digit);
+        if !(chars[i].is_ascii_digit() || sign) {
+            out.push(chars[i]);
+            i += 1;
+            continue;
+        }
+        let start = i;
+        i += usize::from(sign);
+        while i < chars.len() && (chars[i].is_ascii_digit() || (matches!(chars[i], '.' | ',' | ':' | '/') && chars.get(i + 1).is_some_and(char::is_ascii_digit))) {
+            i += 1;
+        }
+        if matches!(chars.get(i), Some('%' | '°')) {
+            i += 1;
+        }
+        out.push(LRE);
+        out.extend(&chars[start..i]);
+        out.push(PDF);
+    }
+    out.into()
+}
+
 pub fn rect(x: f32, y: f32, w: f32, h: f32) -> D2D_RECT_F {
     D2D_RECT_F { left: x.round(), top: y.round(), right: (x + w).round(), bottom: (y + h).round() }
 }
@@ -371,6 +409,8 @@ impl Ink<'_> {
         } else {
             s
         };
+        let isolated = isolate_numbers(s);
+        let s = &*isolated;
         let dw = &self.text.dwrite;
         unsafe {
             let weight = st.weight.dwrite();
@@ -821,6 +861,14 @@ pub fn pcwstr(w: &[u16]) -> PCWSTR {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn numbers_are_isolated_only_in_arabic_text() {
+        assert_eq!(isolate_numbers("Case 40% · 12:30"), "Case 40% · 12:30", "no Arabic: untouched");
+        assert_eq!(isolate_numbers("العلبة 40%"), "العلبة \u{202A}40%\u{202C}");
+        assert_eq!(isolate_numbers("اليوم 37° · ~20 د"), "اليوم \u{202A}37°\u{202C} · \u{202A}~20\u{202C} د");
+        assert_eq!(isolate_numbers("ساعة 1.2 و12:30."), "ساعة \u{202A}1.2\u{202C} و\u{202A}12:30\u{202C}.", "a trailing dot isn't part of the number");
+    }
 
     #[test]
     fn the_first_installed_family_wins() {

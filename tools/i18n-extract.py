@@ -1,13 +1,20 @@
 """Adds the strings the code puts through tr(, trf(, n_(, trc(ctx, ...) and Slint's @tr(...) /
-@tr(ctx => ...) that the English .po lacks, with an empty msgstr to fill in (`cargo t` fails until
-every one has its English).
+@tr(ctx => ...) that the English and Arabic .po files lack, with an empty msgstr to fill in
+(`cargo t` fails until every one has its English and its Arabic).
 Usage: python tools/i18n-extract.py [--list]"""
 import os
 import re
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PO = os.path.join(ROOT, 'i18n', 'en', 'LC_MESSAGES', 'nowbar-ui.po')
+LANGUAGES = ('en', 'ar')
+
+
+def po_path(code):
+    return os.path.join(ROOT, 'i18n', code, 'LC_MESSAGES', 'nowbar-ui.po')
+
+
+
 LIT = r'"((?:[^"\\]|\\.)*)"'
 # trc("ctx", "text"), @tr("ctx" => "text"), then the one-string calls.
 WITH_CONTEXT = re.compile(r'(?<![\w.])(?:trc\(' + LIT + r'\s*,\s*' + LIT + r'|@?tr\(' + LIT + r'\s*=>\s*' + LIT + r')')
@@ -23,9 +30,9 @@ def po_escape(s):
     return s.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n').replace('\t', '\\t')
 
 
-def known():
-    """The (context, msgid) pairs the .po has, translated or not."""
-    text = open(PO, encoding='utf-8').read()
+def known(code):
+    """The (context, msgid) pairs the language's .po has, translated or not."""
+    text = open(po_path(code), encoding='utf-8').read()
     pairs = set()
     for block in re.split(r'\n\s*\n', text):
         ctx = re.search(r'^msgctxt ' + LIT, block, re.M)
@@ -55,13 +62,16 @@ def used():
     return found
 
 
-missing = {k: where for k, where in used().items() if k not in known()}
+found = used()
+missing = {code: {k: where for k, where in found.items() if k not in known(code)} for code in LANGUAGES}
 if '--list' in sys.argv:
-    for (ctx, s), where in missing.items():
-        print(f'{where}: {ctx + " => " if ctx else ""}{s!r}')
+    for code, entries in missing.items():
+        for (ctx, s), where in entries.items():
+            print(f'[{code}] {where}: {ctx + " => " if ctx else ""}{s!r}')
     sys.exit(0)
-with open(PO, 'a', encoding='utf-8', newline='\n') as po:
-    for (ctx, s), where in missing.items():
-        context = f'msgctxt "{po_escape(ctx)}"\n' if ctx else ''
-        po.write(f'\n#: {where}\n{context}msgid "{po_escape(s)}"\nmsgstr ""\n')
-print(f'{len(missing)} added to {os.path.relpath(PO, ROOT)}')
+for code, entries in missing.items():
+    with open(po_path(code), 'a', encoding='utf-8', newline='\n') as po:
+        for (ctx, s), where in entries.items():
+            context = f'msgctxt "{po_escape(ctx)}"\n' if ctx else ''
+            po.write(f'\n#: {where}\n{context}msgid "{po_escape(s)}"\nmsgstr ""\n')
+    print(f'{len(entries)} added to {os.path.relpath(po_path(code), ROOT)}')

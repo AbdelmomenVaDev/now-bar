@@ -88,9 +88,15 @@ fn search_hits(q: &str) -> Vec<Hit> {
 }
 
 fn main() {
-    let english = std::env::args().any(|a| a == "--en");
+    let language = if std::env::args().any(|a| a == "--ar") {
+        Some(nowbar::i18n::Language::Arabic)
+    } else if std::env::args().any(|a| a == "--en") {
+        Some(nowbar::i18n::Language::English)
+    } else {
+        None
+    };
     let win10 = std::env::args().any(|a| a == "--win10");
-    let mut args = std::env::args().skip(1).filter(|a| a != "--en" && a != "--win10");
+    let mut args = std::env::args().skip(1).filter(|a| a != "--en" && a != "--ar" && a != "--win10");
     let out = args.next().unwrap_or_else(|| std::env::temp_dir().join("sheet").to_string_lossy().into_owned());
     let dark = args.next().as_deref() != Some("light");
     let width: f32 = args.next().and_then(|w| w.parse().ok()).unwrap_or(1240.0);
@@ -98,9 +104,9 @@ fn main() {
     std::fs::create_dir_all(&out).expect("out dir");
     let window = nowbar::slint_shot::install(SCALE);
     let ui = SettingsWindow::new().expect("settings window");
-    if english {
-        nowbar::i18n::set_language(nowbar::i18n::Language::English);
-        slint::select_bundled_translation("en").expect("English bundled");
+    if let Some(l) = language {
+        nowbar::i18n::set_language(l);
+        slint::select_bundled_translation(l.slint_tag()).expect("translation bundled");
     }
     ui.global::<Theme>().set_dark(dark);
     nowbar::set_slint_faces!(ui.global::<Theme>());

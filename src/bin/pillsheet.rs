@@ -97,8 +97,10 @@ fn main() -> Result<()> {
     // --en: the painters' own words in English (the samples' lines stay as written).
     if std::env::args().any(|a| a == "--en") {
         nowbar::i18n::set_language(nowbar::i18n::Language::English);
+    } else if std::env::args().any(|a| a == "--ar") {
+        nowbar::i18n::set_language(nowbar::i18n::Language::Arabic);
     }
-    let out = std::env::args().skip(1).find(|a| a != "--en").unwrap_or_else(|| std::env::temp_dir().join("pillsheet.png").to_string_lossy().into_owned());
+    let out = std::env::args().skip(1).find(|a| a != "--en" && a != "--ar").unwrap_or_else(|| std::env::temp_dir().join("pillsheet.png").to_string_lossy().into_owned());
     unsafe { CoInitializeEx(None, COINIT_MULTITHREADED).ok()? };
     let s = Scale(1.25);
     let pills: Vec<(&str, PillContent)> = vec![

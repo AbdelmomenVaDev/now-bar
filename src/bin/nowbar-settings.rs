@@ -17,7 +17,7 @@ use nowbar::settings::{
     self, AnimationSpeed, CardSize, FollowedTeam, Hotkey, Marquee, PillButtons, PillSize, QuestionHotkey, Settings, Theme as Look, TrayClick, WeatherCity,
 };
 use nowbar::activities::buds::Paired;
-use nowbar::i18n::{self, Language, LanguagePick};
+use nowbar::i18n::{self, LanguagePick};
 use nowbar::settings_ui::{app_badge, badge_letter, buds_choices, exception_name, page_arg, search, stand_in_colour, team_code, tidy_presets};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use slint::winit_030::winit::window::ResizeDirection;
@@ -407,14 +407,14 @@ fn show_buds(st: &Store, b: &Bridge) {
 }
 
 /// The Dil choice's order.
-const LANGUAGES: [LanguagePick; 3] = [LanguagePick::Auto, LanguagePick::Turkish, LanguagePick::English];
+const LANGUAGES: [LanguagePick; 4] = [LanguagePick::Auto, LanguagePick::Turkish, LanguagePick::English, LanguagePick::Arabic];
 
 /// Speaks `p`'s language: the Rust side's strings, and the Slint ones (bundled; "" is the Turkish
 /// they're written in).
 fn speak(p: LanguagePick) {
     let l = i18n::chosen(p);
     i18n::set_language(l);
-    let _ = slint::select_bundled_translation(if l == Language::English { "en" } else { "" });
+    let _ = slint::select_bundled_translation(l.slint_tag());
 }
 
 /// Puts every setting into the window.
