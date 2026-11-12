@@ -721,6 +721,23 @@ mod tests {
         assert!(s.dismissed.is_empty());
     }
 
+    /// The Windows calls and the site, for real: `cargo t -p pebbly sysmon_live -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn sysmon_live() {
+        println!("ram: {:?}", ram_percent());
+        let mut meter = CpuMeter::default();
+        println!("cpu first: {:?}", meter.sample());
+        std::thread::sleep(Duration::from_millis(1000));
+        println!("cpu then: {:?}", meter.sample());
+        println!("internet: {}", internet_up());
+        println!("proton adapter: {:?}", proton_adapter());
+        let page = crate::platform::http::get_text(RATE_URL).expect("the page");
+        let rate = parse_rate(&page, 0);
+        println!("rate: {rate:?}");
+        assert!(rate.is_some());
+    }
+
     #[test]
     fn snooze_rings_again_later() {
         let mut s = SysCards::default();
