@@ -31,6 +31,7 @@ pub mod shelf;
 pub mod shelf_tools;
 pub mod shelf_tools_worker;
 pub mod shelf_worker;
+pub mod sysmon;
 pub mod timer;
 pub mod transfer;
 pub mod transfer_worker;

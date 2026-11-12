@@ -269,6 +269,21 @@ pub struct Settings {
     pub api_enabled: bool,
     /// The user's answers to the apps that asked, newest last.
     pub api_apps: Vec<ApiApp>,
+    // Sistem kartları
+    /// A card while RAM is above 80 % (gone at 79 %).
+    pub sys_ram: bool,
+    /// A card while the CPU is above 60 %.
+    pub sys_cpu: bool,
+    /// A card while Proton VPN is connected.
+    pub sys_vpn: bool,
+    /// A card when the internet goes, and when it comes back.
+    pub sys_net: bool,
+    /// Alarms ring at the times in `alarm_times`.
+    pub sys_alarm: bool,
+    /// The alarms: "07:00 Uyan, 13:30" (a time and an optional name each, every day).
+    pub alarm_times: String,
+    /// A card with the dollar's rate in Syrian pounds (sp-today.com), fetched by its button.
+    pub sys_syp: bool,
     // Oyunlar
     /// Steam's games (downloads, play) from its registry key and files.
     pub games_steam: bool,
@@ -391,6 +406,13 @@ impl Default for Settings {
             claude_ask: true,
             api_enabled: false,
             api_apps: Vec::new(),
+            sys_ram: true,
+            sys_cpu: true,
+            sys_vpn: true,
+            sys_net: true,
+            sys_alarm: true,
+            alarm_times: String::new(),
+            sys_syp: false,
             claude_ask_wait_s: 60,
             games_steam: true,
             games_epic: true,
@@ -428,6 +450,7 @@ impl Settings {
         }
         self.media_paused_keep_min = self.media_paused_keep_min.min(24 * 60);
         self.timer_add_minutes = self.timer_add_minutes.clamp(1, 60);
+        self.alarm_times = self.alarm_times.chars().take(200).collect();
         self.timer_presets_min = self.timer_presets_min.iter().map(|m| (*m).clamp(1, 180)).take(6).collect();
         if self.timer_presets_min.is_empty() {
             self.timer_presets_min = Settings::default().timer_presets_min;

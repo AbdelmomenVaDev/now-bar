@@ -878,6 +878,56 @@ export component TimerInspector inherits VerticalLayout {
         }
     }
     ISection {
+        title: @tr("Alarm");
+        IRow {
+            label: @tr("Alarmlar");
+            note: @tr("Yazdığın saatlerde her gün çalar");
+            Toggle {
+                checked <=> Store.sys-alarm;
+                toggled => { Ui.changed(); }
+            }
+        }
+        IRow {
+            opacity: Store.sys-alarm ? 1 : 0.4;
+            label: @tr("Alarm saatleri");
+            note: @tr("Virgülle: 07:00 Uyan, 13:30");
+            // The city box's look, without its icon.
+            Rectangle {
+                width: 200px;
+                height: 30px;
+                border-radius: 8px;
+                background: Theme.field;
+                border-width: 1px;
+                border-color: alarms.has-focus ? Theme.acc : alarms-hover.has-hover ? Theme.text3 : Theme.field-edge;
+                alarms-hover := TouchArea {
+                    mouse-cursor: text;
+                    clicked => { alarms.focus(); }
+                }
+                if alarms.text == "": Text {
+                    x: 10px;
+                    width: parent.width - 20px;
+                    height: parent.height;
+                    text: "07:00, 13:30";
+                    font-size: 13.5px;
+                    color: Theme.text3;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+                alarms := TextInput {
+                    x: 10px;
+                    width: parent.width - 20px;
+                    height: parent.height;
+                    font-size: 13.5px;
+                    color: Theme.strong;
+                    vertical-alignment: center;
+                    single-line: true;
+                    text <=> Store.alarm-times;
+                    edited => { Ui.changed(); }
+                }
+            }
+        }
+    }
+    ISection {
         title: @tr("Süre dolunca");
         IRow {
             label: @tr("Alarm sesi");
@@ -1779,6 +1829,49 @@ export component SystemInspector inherits VerticalLayout {
             note: @tr("Galaxy Buds dışındakiler, piliyle");
             Toggle {
                 checked <=> Store.headsets-on;
+                toggled => { Ui.changed(); }
+            }
+        }
+    }
+    ISection {
+        title: @tr("Sistem kartları");
+        IRow {
+            label: @tr("RAM uyarısı");
+            note: @tr("%80'in üstünde bir kart; %79'a inince kaybolur");
+            Toggle {
+                checked <=> Store.sys-ram;
+                toggled => { Ui.changed(); }
+            }
+        }
+        IRow {
+            label: @tr("CPU uyarısı");
+            note: @tr("%60'ın üstünde bir kart");
+            Toggle {
+                checked <=> Store.sys-cpu;
+                toggled => { Ui.changed(); }
+            }
+        }
+        IRow {
+            label: @tr("Proton VPN");
+            note: @tr("VPN bağlıyken bir kart");
+            Toggle {
+                checked <=> Store.sys-vpn;
+                toggled => { Ui.changed(); }
+            }
+        }
+        IRow {
+            label: @tr("İnternet bağlantısı");
+            note: @tr("Kesilince ve geri gelince");
+            Toggle {
+                checked <=> Store.sys-net;
+                toggled => { Ui.changed(); }
+            }
+        }
+        IRow {
+            label: @tr("Suriye lirası");
+            note: @tr("sp-today.com; güncelleme elle, kartın düğmesiyle");
+            Toggle {
+                checked <=> Store.sys-syp;
                 toggled => { Ui.changed(); }
             }
         }

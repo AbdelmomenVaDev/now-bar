@@ -72,7 +72,7 @@ impl AppMeta {
 
 /// Whether `push` (and anything over WM_COPYDATA) may use `id`: the API's ids are the apps'.
 pub fn push_id_ok(id: &str) -> bool {
-    !id.starts_with("app:") && !id.starts_with("ask:")
+    !id.starts_with("app:") && !id.starts_with("ask:") && !id.starts_with("sys:")
 }
 
 /// `push`'s flags (the arguments after `push`); `None` when a flag is unknown, a value is
@@ -208,8 +208,11 @@ impl LiveSet {
                 }
             }
         }
-        if self.items.len() >= LIVE_MAX {
-            if let Some(quietest) = self.items.iter().min_by_key(|i| i.seen_ms).map(|i| i.key) {
+        // The system cards (`sys:`) are Pebbly's own: they neither count towards the limit nor
+        // make room for themselves.
+        let outside = |i: &&LiveItem| !i.id.starts_with("sys:");
+        if !id.starts_with("sys:") && self.items.iter().filter(outside).count() >= LIVE_MAX {
+            if let Some(quietest) = self.items.iter().filter(outside).min_by_key(|i| i.seen_ms).map(|i| i.key) {
                 self.remove(quietest);
             }
         }
@@ -476,6 +479,22 @@ mod tests {
     fn push_ids_cannot_take_app_ids() {
         assert!(push_id_ok("yedek") && push_id_ok("claude:s1"));
         assert!(!push_id_ok("app:0123:yedek") && !push_id_ok("ask:0123"));
+        assert!(!push_id_ok("sys:ram"), "the system cards are Pebbly's own");
+    }
+
+    #[test]
+    fn system_cards_neither_count_nor_evict() {
+        let mut set = LiveSet::default();
+        for n in 0..LIVE_MAX as u64 {
+            set.apply(msg(&format!("i{n}"), LiveState::Run), 1_000 + n);
+        }
+        for id in crate::activities::sysmon::IDS {
+            set.apply(msg(id, LiveState::Wait), 2_000);
+        }
+        assert_eq!(set.items().len(), LIVE_MAX + crate::activities::sysmon::IDS.len(), "all of the outside ones and every card");
+        set.apply(msg("one-more", LiveState::Run), 3_000);
+        assert!(set.get(live_key("i0")).is_none(), "an outside item makes room among the outside ones");
+        assert!(crate::activities::sysmon::IDS.iter().all(|id| set.get(live_key(id)).is_some()), "and never takes a card's place");
     }
 
     #[test]

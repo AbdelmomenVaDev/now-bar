@@ -164,7 +164,7 @@ fn claude_hook(asks: bool) {
     let Ok(mut hook) = serde_json::from_str::<serde_json::Value>(&text) else { return };
     // The words it hands the Now Bar ("İzin istiyor"…) are shown as they come: in the language the
     // user picked, not the Turkish a process that never read the settings speaks.
-    nowbar::i18n::set_language(nowbar::i18n::chosen(nowbar::settings::load().language));
+    pebbly::i18n::set_language(pebbly::i18n::chosen(pebbly::settings::load().language));
     let event = hook["hook_event_name"].as_str().unwrap_or("").to_string();
     if event == "UserPromptSubmit" {
         let window = unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };

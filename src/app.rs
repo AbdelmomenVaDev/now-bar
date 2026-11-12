@@ -62,6 +62,7 @@ use crate::activities::claude::{done_status, step_label, task_progress};
 use crate::platform::captures::{Capture, CaptureMailbox};
 use crate::activities::live::{live_key, pill_status, push_id_ok, AppIcon, AppMeta, LiveItem, LiveSet, LiveState};
 use crate::activities::api::ApiMailbox;
+use crate::activities::sysmon::{self, SysCards};
 use crate::activities::api_desk::Desk;
 use crate::platform::api_server::ApiServer;
 use crate::render::card::{AppCard, APP_CARD_ICON_DIP};
@@ -166,6 +167,9 @@ const MUSIC_SAVE_MS: u64 = 300_000;
 const TIMER_CARET: usize = 18;
 /// The Buds' case opened: the offer to connect, unless they came by themselves meanwhile.
 const TIMER_BUDS_OFFER: usize = 19;
+/// The system cards (RAM, CPU, VPN, internet, alarms) look at their sources this often.
+const TIMER_SYSMON: usize = 20;
+const SYSMON_EVERY_MS: u32 = 2_000;
 const CARET_BLINK_MS: u32 = 530;
 /// Characters a line of the question card's answer holds, about (13.5 px over 330 DIP; a little
 /// short, so the area is rather too tall than cut).
@@ -353,6 +357,15 @@ fn match_key(m: &MatchSnapshot) -> u32 {
 
 fn match_id_key(id: &str) -> u32 {
     id.parse::<u64>().map(|v| v as u32).unwrap_or_else(|_| live_key(id))
+}
+
+/// A system card's (status, text): the item's text holds the status, a unit separator, then the
+/// text. `None` for every other item.
+fn sys_parts(i: &LiveItem) -> Option<(&str, &str)> {
+    if !i.id.starts_with("sys:") {
+        return None;
+    }
+    i.text.split_once('\u{1F}')
 }
 
 fn unix_now() -> i64 {
@@ -776,6 +789,8 @@ pub struct App {
     alert_moment: Option<(Alert, u64)>,
     /// What other programs sent (`pebbly.exe push`, Claude Code's hooks, apps through the API).
     live: LiveSet,
+    /// The system cards (`sys:` items of the live set): RAM, CPU, Proton VPN, the internet, alarms, the rate.
+    sys: SysCards,
     /// The API: its listener while it is on, what it hands over, and the prompts, waiting
     /// requests and clicks.
     api_server: Option<ApiServer>,
@@ -1039,6 +1054,7 @@ impl App {
             alerts: Default::default(),
             alert_moment: None,
             live: LiveSet::default(),
+            sys: SysCards::default(),
             api_server: None,
             api_mailbox: ApiMailbox::default(),
             api: Desk::default(),
@@ -1119,6 +1135,7 @@ impl App {
         unsafe { SetTimer(Some(app.main.hwnd), TIMER_BAR_CHECK, BAR_CHECK_MS, None) };
         unsafe { SetTimer(Some(app.main.hwnd), TIMER_WALLPAPER, WALLPAPER_EVERY_MS, None) };
         unsafe { SetTimer(Some(app.main.hwnd), TIMER_MUSIC, MUSIC_EVERY_MS, None) };
+        unsafe { SetTimer(Some(app.main.hwnd), TIMER_SYSMON, SYSMON_EVERY_MS, None) };
         app.check_wallpaper();
         if let Some(old) = follow_exe() {
             log(&format!("autostart: now starts this copy (was {old})"));
@@ -1347,7 +1364,7 @@ impl App {
             p.push(Presence { kind: ActivityKind::Capture, state: PresenceState::Moment, changed_ms: *at });
         }
         // An app's items follow the API's switch; the rest, the live activities'.
-        for i in self.live.items().iter().filter(|i| if i.app.is_some() { s.api_enabled } else { s.live_enabled }) {
+        for i in self.live.items().iter().filter(|i| if i.id.starts_with("sys:") { true } else if i.app.is_some() { s.api_enabled } else { s.live_enabled }) {
             let state = match i.state {
                 LiveState::Wait => PresenceState::Waiting,
                 LiveState::Done => PresenceState::Done,
@@ -2853,6 +2870,11 @@ impl App {
             }
             CardAction::LiveClose => {
                 if let Some(OpenCard::Activity(ActivityKind::Live(key))) = self.open {
+                    if let Some(id) = self.sys_id(key) {
+                        self.sys.dismiss(&id);
+                        self.live.remove(key);
+                        return self.close_card();
+                    }
                     // An app hears it was dismissed; its prompt's × is a "not now".
                     self.api.dismissed(key, &mut self.live, now);
                     self.live.remove(key);
@@ -2861,6 +2883,13 @@ impl App {
             }
             CardAction::AppButton(painted, i) => {
                 if let Some(key) = self.open_live(painted) {
+                    if let Some(id) = self.sys_id(key) {
+                        let button = self.live.get(key).and_then(|it| it.app.as_ref()).and_then(|a| a.buttons.get(i as usize)).map(|b| b.id.clone());
+                        if let Some(button) = button {
+                            self.sys.button(&id, &button, unix_now());
+                        }
+                        return self.sys_tick();
+                    }
                     if let Some(uri) = self.api.click(key, i, &mut self.live, now) {
                         open_url(&uri);
                     }
@@ -2873,6 +2902,13 @@ impl App {
                 }
             }
             CardAction::AppMute(painted) => {
+                if let Some(id) = self.open_live(painted).and_then(|key| self.sys_id(key)) {
+                    self.sys.dismiss(&id);
+                    if let Some(key) = self.open_live(painted) {
+                        self.live.remove(key);
+                    }
+                    return self.close_card();
+                }
                 if let Some(answer) = self.open_live(painted).and_then(|key| self.api.mute(key, &mut self.live)) {
                     self.remember_app(answer);
                 }
@@ -3110,6 +3146,9 @@ impl App {
     /// An app's item's right-hand status: a prompt asks, a notification says nothing, an
     /// activity says where it is.
     fn app_status(i: &LiveItem, app: &AppMeta, now: u64) -> String {
+        if let Some((status, _)) = sys_parts(i) {
+            return status.to_string();
+        }
         match i.state {
             _ if app.prompt => tr("İzin istiyor").to_string(),
             _ if app.life_ms.is_some() => String::new(),
@@ -3124,7 +3163,7 @@ impl App {
         PillContent::App {
             key: i.key,
             title: i.title.clone(),
-            text: i.text.clone(),
+            text: sys_parts(i).map_or_else(|| i.text.clone(), |(_, text)| text.to_string()),
             status: Self::app_status(i, app, now),
             icon: self.app_icon(app.icon.as_ref(), APP_PILL_ICON_DIP, self.ui.pill_scale.0),
             accent: app.accent.unwrap_or_else(crate::render::pill::timer_accent),
@@ -3139,7 +3178,7 @@ impl App {
             name: app.name.clone(),
             exe: app.exe.rsplit(['\\', '/']).next().unwrap_or(&app.exe).to_string(),
             // A prompt shows where the app really runs from.
-            text: if app.prompt { app.exe.clone() } else { i.text.clone() },
+            text: if app.prompt { app.exe.clone() } else { sys_parts(i).map_or_else(|| i.text.clone(), |(_, text)| text.to_string()) },
             status: if app.prompt { String::new() } else { Self::app_status(i, app, now) },
             progress: i.progress,
             icon: self.app_icon(app.icon.as_ref(), APP_CARD_ICON_DIP, self.ui.card_scale.0),
@@ -3147,6 +3186,67 @@ impl App {
             buttons: app.buttons.iter().map(|b| b.label.clone()).collect(),
             prompt: app.prompt,
         }
+    }
+
+    /// The id of a system card (`sys:...`) when `key` is one.
+    fn sys_id(&self, key: u32) -> Option<String> {
+        self.live.get(key).filter(|i| i.id.starts_with("sys:")).map(|i| i.id.clone())
+    }
+
+    /// What the system cards show, to tell whether a tick changed anything.
+    fn sys_view(&self) -> Vec<(String, String, Option<u8>, LiveState)> {
+        self.live.items().iter().filter(|i| i.id.starts_with("sys:")).map(|i| (i.id.clone(), format!("{}|{}", i.title, i.text), i.progress, i.state)).collect()
+    }
+
+    /// RAM, CPU, Proton VPN, the internet, alarms and the rate: the cards that should be there now
+    /// are applied to the live set, the others leave; an alarm plays its sound.
+    fn sys_tick(&mut self) -> Result<()> {
+        let s = settings::current();
+        let now = now_ms();
+        let before = (self.sys_view(), self.live_states());
+        let tick = if s.enabled { self.sys.tick(&s, now, unix_now(), tz_offset_s()) } else { sysmon::Tick::default() };
+        let mut alarm_key = None;
+        for id in sysmon::IDS {
+            if !tick.cards.iter().any(|c| c.id == id) {
+                self.live.remove(live_key(id));
+            }
+        }
+        for c in &tick.cards {
+            // The status leads the text, apart from it by a unit separator (`sys_parts`).
+            let meta = AppMeta {
+                owner: c.id.to_string(),
+                name: "Pebbly".into(),
+                exe: "pebbly.exe".into(),
+                client_id: c.id.to_string(),
+                icon: Some(AppIcon::Glyph(c.glyph)),
+                accent: Some(c.accent),
+                buttons: c.buttons.clone(),
+                prompt: false,
+                life_ms: None,
+            };
+            let text = format!("{}\u{1F}{}", c.status, c.text);
+            self.live.apply(
+                crate::activities::live::LiveMsg { id: c.id.to_string(), title: c.title.clone(), text, progress: c.progress, state: c.state, claude: None, app: Some(Box::new(meta)) },
+                now,
+            );
+            if c.id == sysmon::ID_ALARM {
+                alarm_key = Some(live_key(c.id));
+            }
+        }
+        if tick.ring {
+            if s.timer_sound != "none" {
+                play_windows_sound(&s.timer_sound);
+            }
+            if let (Some(key), true, true) = (alarm_key, s.timer_done_open_card, should_show_done_card(self.fullscreen)) {
+                if self.open.is_none() {
+                    self.open_card(OpenCard::Activity(ActivityKind::Live(key)), false)?;
+                }
+            }
+        }
+        if before != (self.sys_view(), self.live_states()) {
+            self.refresh()?;
+        }
+        Ok(())
     }
 
     /// A script's or a Claude session's pill.
@@ -4387,6 +4487,7 @@ impl App {
                 self.follow_music();
                 Ok(())
             }
+            UiEvent::Timer(TIMER_SYSMON) => self.sys_tick(),
             UiEvent::Wallpaper => self.repaint(),
             UiEvent::Games => self.take_games(),
             UiEvent::Wellbeing => self.take_wellbeing(),

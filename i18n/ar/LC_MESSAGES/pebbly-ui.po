@@ -3845,3 +3845,150 @@ msgstr "تمت إزالة Pebbly"
 #: setup/ui/setup.slint
 msgid "Pebbly kuruldu"
 msgstr "تم تثبيت Pebbly"
+#: src/settings_ui.rs
+msgid "Alarm"
+msgstr "المنبّه"
+
+#: src/settings_ui.rs
+msgid "Alarmlar"
+msgstr "المنبّهات"
+
+#: src/settings_ui.rs
+msgid "Yazdığın saatlerde her gün çalar; kartında Ertele ve Durdur var"
+msgstr "يرن كل يوم في الأوقات التي تكتبها؛ وفي بطاقته غفوة وإيقاف"
+
+#: src/settings_ui.rs
+msgid "Alarm saatleri"
+msgstr "أوقات المنبّه"
+
+#: src/settings_ui.rs
+msgid "Saat ve isteğe bağlı bir ad, virgülle: 07:00 Uyan, 13:30"
+msgstr "وقت واسم اختياري، مفصولة بفاصلة: 07:00 استيقظ، 13:30"
+
+#: src/settings_ui.rs
+msgid "Sistem kartları"
+msgstr "بطاقات النظام"
+
+#: src/settings_ui.rs
+msgid "RAM uyarısı"
+msgstr "تنبيه الذاكرة (RAM)"
+
+#: src/settings_ui.rs
+msgid "RAM %80'in üstüne çıkınca kullanılan oranla bir kart; %79'a inince kaybolur"
+msgstr "بطاقة بنسبة الاستخدام عندما تتجاوز الذاكرة 80%؛ تختفي عند 79%"
+
+#: src/settings_ui.rs
+msgid "CPU uyarısı"
+msgstr "تنبيه المعالج (CPU)"
+
+#: src/settings_ui.rs
+msgid "İşlemci %60'ın üstüne çıkınca kullanılan oranla bir kart"
+msgstr "بطاقة بنسبة الاستخدام عندما يتجاوز المعالج 60%"
+
+#: src/settings_ui.rs
+msgid "Proton VPN"
+msgstr "Proton VPN"
+
+#: src/settings_ui.rs
+msgid "Proton VPN bağlıyken bir kart"
+msgstr "بطاقة أثناء اتصال Proton VPN"
+
+#: src/settings_ui.rs
+msgid "İnternet bağlantısı"
+msgstr "الاتصال بالإنترنت"
+
+#: src/settings_ui.rs
+msgid "İnternet kesilince ve geri gelince bir kart"
+msgstr "بطاقة عند انقطاع الإنترنت وعند عودته"
+
+#: src/settings_ui.rs
+msgid "Suriye lirası"
+msgstr "الليرة السورية"
+
+#: src/settings_ui.rs
+msgid "Dolar kuru sp-today.com'dan; güncelleme elle, kartın düğmesiyle"
+msgstr "سعر الدولار من sp-today.com؛ التحديث يدوي بزر البطاقة"
+
+#: src/activities/sysmon.rs
+msgid "Bellek çok kullanılıyor"
+msgstr "استخدام الذاكرة مرتفع"
+
+#: src/activities/sysmon.rs
+msgid "İşlemci yoğun çalışıyor"
+msgstr "المعالج مشغول"
+
+#: src/activities/sysmon.rs
+msgid "VPN tüneli açık"
+msgstr "نفق VPN يعمل"
+
+#: src/activities/sysmon.rs
+msgid "Bağlı"
+msgstr "متصل"
+
+#: src/activities/sysmon.rs
+msgid "İnternet"
+msgstr "الإنترنت"
+
+#: src/activities/sysmon.rs
+msgid "İnternet bağlantısı kesildi"
+msgstr "انقطع الاتصال بالإنترنت"
+
+#: src/activities/sysmon.rs
+msgid "İnternet geri geldi"
+msgstr "عاد الاتصال بالإنترنت"
+
+#: src/activities/sysmon.rs
+msgid "{} · alarm çalıyor"
+msgstr "{} · المنبّه يرن"
+
+#: src/activities/sysmon.rs
+msgid "Ertele · {} dk"
+msgstr "غفوة · {} د"
+
+#: src/activities/sysmon.rs
+msgid "Güncelleniyor…"
+msgstr "جارٍ التحديث…"
+
+#: src/activities/sysmon.rs
+msgid "Alış {} · eski lirayla {}–{}"
+msgstr "شراء {} · بالليرة القديمة {}–{}"
+
+#: src/activities/sysmon.rs
+msgid "Güncellenemedi"
+msgstr "تعذّر التحديث"
+
+#: src/activities/sysmon.rs
+msgid "Kuru almak için Güncelle'ye bas"
+msgstr "اضغط تحديث لجلب السعر"
+
+#: src/activities/sysmon.rs
+msgid "Dolar · Suriye lirası"
+msgstr "الدولار · الليرة السورية"
+
+#: ui/pages.slint
+msgid "Yazdığın saatlerde her gün çalar"
+msgstr "يرن كل يوم في الأوقات التي تكتبها"
+
+#: ui/pages.slint
+msgid "Virgülle: 07:00 Uyan, 13:30"
+msgstr "افصل بفاصلة: 07:00 استيقظ، 13:30"
+
+#: ui/pages.slint
+msgid "%80'in üstünde bir kart; %79'a inince kaybolur"
+msgstr "بطاقة فوق 80%؛ تختفي عند 79%"
+
+#: ui/pages.slint
+msgid "%60'ın üstünde bir kart"
+msgstr "بطاقة فوق 60%"
+
+#: ui/pages.slint
+msgid "VPN bağlıyken bir kart"
+msgstr "بطاقة أثناء اتصال VPN"
+
+#: ui/pages.slint
+msgid "Kesilince ve geri gelince"
+msgstr "عند الانقطاع وعند العودة"
+
+#: ui/pages.slint
+msgid "sp-today.com; güncelleme elle, kartın düğmesiyle"
+msgstr "sp-today.com؛ التحديث يدوي بزر البطاقة"

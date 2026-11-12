@@ -504,6 +504,13 @@ fn fill(ui: &SettingsWindow, s: &Settings, live_apps: &[String]) {
     st.set_capture_moment(s.capture_moment);
     st.set_capture_to_shelf(s.capture_to_shelf);
     st.set_claude_ask(s.claude_ask);
+    st.set_sys_ram(s.sys_ram);
+    st.set_sys_cpu(s.sys_cpu);
+    st.set_sys_vpn(s.sys_vpn);
+    st.set_sys_net(s.sys_net);
+    st.set_sys_syp(s.sys_syp);
+    st.set_sys_alarm(s.sys_alarm);
+    st.set_alarm_times(s.alarm_times.clone().into());
     st.set_claude_ask_wait(s.claude_ask_wait_s as f32);
     st.set_api_on(s.api_enabled);
     st.set_api_address(api_address().into());
@@ -615,6 +622,13 @@ fn read(ui: &SettingsWindow, base: &Settings) -> Settings {
         capture_moment: st.get_capture_moment(),
         capture_to_shelf: st.get_capture_to_shelf(),
         claude_ask: st.get_claude_ask(),
+        sys_ram: st.get_sys_ram(),
+        sys_cpu: st.get_sys_cpu(),
+        sys_vpn: st.get_sys_vpn(),
+        sys_net: st.get_sys_net(),
+        sys_syp: st.get_sys_syp(),
+        sys_alarm: st.get_sys_alarm(),
+        alarm_times: st.get_alarm_times().to_string(),
         claude_ask_wait_s: st.get_claude_ask_wait().round() as u32,
         api_enabled: st.get_api_on(),
         update_check: st.get_update_check(),

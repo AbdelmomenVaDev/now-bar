@@ -3753,3 +3753,151 @@ msgstr "Moving over from Now Bar"
 #: setup/src/main.rs
 msgid "Now Bar v{} kurulu · Pebbly'ye geçecek"
 msgstr "Now Bar v{} installed · moves to Pebbly"
+
+#: src/settings_ui.rs
+msgid "Alarm"
+msgstr "Alarm"
+
+#: src/settings_ui.rs
+msgid "Alarmlar"
+msgstr "Alarms"
+
+#: src/settings_ui.rs
+msgid "Yazdığın saatlerde her gün çalar; kartında Ertele ve Durdur var"
+msgstr "Rings every day at the times you write; its card has Snooze and Stop"
+
+#: src/settings_ui.rs
+msgid "Alarm saatleri"
+msgstr "Alarm times"
+
+#: src/settings_ui.rs
+msgid "Saat ve isteğe bağlı bir ad, virgülle: 07:00 Uyan, 13:30"
+msgstr "A time and an optional name, comma-separated: 07:00 Wake up, 13:30"
+
+#: src/settings_ui.rs
+msgid "Sistem kartları"
+msgstr "System cards"
+
+#: src/settings_ui.rs
+msgid "RAM uyarısı"
+msgstr "RAM alert"
+
+#: src/settings_ui.rs
+msgid "RAM %80'in üstüne çıkınca kullanılan oranla bir kart; %79'a inince kaybolur"
+msgstr "A card with the share in use when RAM goes above 80%; it goes at 79%"
+
+#: src/settings_ui.rs
+msgid "CPU uyarısı"
+msgstr "CPU alert"
+
+#: src/settings_ui.rs
+msgid "İşlemci %60'ın üstüne çıkınca kullanılan oranla bir kart"
+msgstr "A card with the share in use when the processor goes above 60%"
+
+#: src/settings_ui.rs
+msgid "Proton VPN"
+msgstr "Proton VPN"
+
+#: src/settings_ui.rs
+msgid "Proton VPN bağlıyken bir kart"
+msgstr "A card while Proton VPN is connected"
+
+#: src/settings_ui.rs
+msgid "İnternet bağlantısı"
+msgstr "Internet connection"
+
+#: src/settings_ui.rs
+msgid "İnternet kesilince ve geri gelince bir kart"
+msgstr "A card when the internet drops and when it comes back"
+
+#: src/settings_ui.rs
+msgid "Suriye lirası"
+msgstr "Syrian pound"
+
+#: src/settings_ui.rs
+msgid "Dolar kuru sp-today.com'dan; güncelleme elle, kartın düğmesiyle"
+msgstr "The dollar's rate from sp-today.com; updated by hand, with the card's button"
+
+#: src/activities/sysmon.rs
+msgid "Bellek çok kullanılıyor"
+msgstr "Memory use is high"
+
+#: src/activities/sysmon.rs
+msgid "İşlemci yoğun çalışıyor"
+msgstr "The processor is busy"
+
+#: src/activities/sysmon.rs
+msgid "VPN tüneli açık"
+msgstr "The VPN tunnel is up"
+
+#: src/activities/sysmon.rs
+msgid "Bağlı"
+msgstr "Connected"
+
+#: src/activities/sysmon.rs
+msgid "İnternet"
+msgstr "Internet"
+
+#: src/activities/sysmon.rs
+msgid "İnternet bağlantısı kesildi"
+msgstr "The internet connection was lost"
+
+#: src/activities/sysmon.rs
+msgid "İnternet geri geldi"
+msgstr "The internet is back"
+
+#: src/activities/sysmon.rs
+msgid "{} · alarm çalıyor"
+msgstr "{} · alarm is ringing"
+
+#: src/activities/sysmon.rs
+msgid "Ertele · {} dk"
+msgstr "Snooze · {} min"
+
+#: src/activities/sysmon.rs
+msgid "Güncelleniyor…"
+msgstr "Updating…"
+
+#: src/activities/sysmon.rs
+msgid "Alış {} · eski lirayla {}–{}"
+msgstr "Buy {} · in old lira {}–{}"
+
+#: src/activities/sysmon.rs
+msgid "Güncellenemedi"
+msgstr "Couldn't update"
+
+#: src/activities/sysmon.rs
+msgid "Kuru almak için Güncelle'ye bas"
+msgstr "Press Update to get the rate"
+
+#: src/activities/sysmon.rs
+msgid "Dolar · Suriye lirası"
+msgstr "Dollar · Syrian pound"
+
+#: ui/pages.slint
+msgid "Yazdığın saatlerde her gün çalar"
+msgstr "Rings every day at the times you write"
+
+#: ui/pages.slint
+msgid "Virgülle: 07:00 Uyan, 13:30"
+msgstr "Comma-separated: 07:00 Wake up, 13:30"
+
+#: ui/pages.slint
+msgid "%80'in üstünde bir kart; %79'a inince kaybolur"
+msgstr "A card above 80%; it goes at 79%"
+
+#: ui/pages.slint
+msgid "%60'ın üstünde bir kart"
+msgstr "A card above 60%"
+
+#: ui/pages.slint
+msgid "VPN bağlıyken bir kart"
+msgstr "A card while the VPN is connected"
+
+#: ui/pages.slint
+msgid "Kesilince ve geri gelince"
+msgstr "When it drops and when it's back"
+
+#: ui/pages.slint
+msgid "sp-today.com; güncelleme elle, kartın düğmesiyle"
+msgstr "sp-today.com; updated by hand, with the card's button"
