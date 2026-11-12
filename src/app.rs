@@ -17,8 +17,9 @@ use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, KillTimer, PostQuitM
 
 use crate::i18n::{percent, tr, trc, trf};
 use crate::activities::timer::{format_duration_label, format_elapsed, format_stopwatch, format_timer, RunState, Stopwatch, Timer};
-use crate::activities::buds::{ear_action, is_low, BudsSnapshot, EarAction, EarPause, NoiseControl, EAR_RESUME_MS};
-use crate::activities::buds_worker::BudsWorker;
+use crate::activities::buds::{ear_action, is_low, BudsSnapshot, EarAction, EarPause, FitTest, NoiseControl, EAR_RESUME_MS};
+use crate::activities::buds_controls::{Drain, FindState, Health};
+use crate::activities::buds_worker::{BudsNews, BudsWorker};
 use crate::activities::football::{centre_text, minute_text, moments, shown, EventKind, MatchSnapshot, MatchStatus, Moment, Side, Team};
 use crate::activities::football_worker::crest_path;
 use crate::render::color::{accent_from_rgba, team_palette, TeamPalette};
@@ -81,6 +82,12 @@ use crate::platform::hotkey::{register_hotkey, register_question_hotkey};
 use crate::activities::question::{lines_estimate, plain, Edit as FieldEdit, Field};
 use crate::activities::question_worker::{AskBox, AskMailbox, AskState, AskWorker};
 use crate::render::card::{QuestionCard, QuestionShow};
+use crate::render::card::BudsPage;
+use crate::activities::buds_nearby::Offer;
+use crate::activities::buds_nearby_worker::NearbyWorker;
+
+mod buds_offer;
+mod buds_ui;
 use crate::platform::dragdrop::{self, DropZone};
 use crate::platform::log::log;
 use crate::platform::taskbar::{self, ItemsMailbox};
@@ -157,6 +164,8 @@ const MUSIC_EVERY_MS: u32 = 30_000;
 const MUSIC_SAVE_MS: u64 = 300_000;
 /// The question card's caret blinks at Windows' own pace.
 const TIMER_CARET: usize = 18;
+/// The Buds' case opened: the offer to connect, unless they came by themselves meanwhile.
+const TIMER_BUDS_OFFER: usize = 19;
 const CARET_BLINK_MS: u32 = 530;
 /// Characters a line of the question card's answer holds, about (13.5 px over 330 DIP; a little
 /// short, so the area is rather too tall than cut).
@@ -526,14 +535,14 @@ fn effects_enabled() -> bool {
     os::card_blur(os::generation(), settings::current().card_blur, transparency)
 }
 
-/// Starts the settings window (`nowbar-settings.exe` next to this exe); it keeps one instance.
+/// Starts the settings window (`pebbly-settings.exe` next to this exe); it keeps one instance.
 fn open_settings() {
     open_settings_at(None);
 }
 
 /// The settings window on `page` (`--page N`; an open window switches to it).
 fn open_settings_at(page: Option<u8>) {
-    let exe = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("nowbar-settings.exe")));
+    let exe = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("pebbly-settings.exe")));
     match exe {
         Some(path) if path.exists() => {
             let mut cmd = std::process::Command::new(path);
@@ -548,7 +557,7 @@ fn open_settings_at(page: Option<u8>) {
                 log(&format!("settings window: {e:?}"));
             }
         }
-        _ => log("settings window: nowbar-settings.exe not found next to nowbar.exe"),
+        _ => log("settings window: pebbly-settings.exe not found next to pebbly.exe"),
     }
 }
 
@@ -664,8 +673,30 @@ pub struct App {
     swipe: Swipe,
     /// Latest Buds reading and when they connected (GetTickCount64 ms).
     buds: Option<(BudsSnapshot, u64)>,
-    buds_mailbox: std::sync::Arc<std::sync::Mutex<Option<Option<BudsSnapshot>>>>,
+    /// What the Buds worker reported, waiting for the UI thread.
+    buds_news: std::sync::Arc<std::sync::Mutex<Vec<BudsNews>>>,
     buds_worker: BudsWorker,
+    /// The Buds card's fit test (a result stays until the card closes).
+    buds_fit: FitTest,
+    /// The Buds card's page, and the one coming in halfway through a page turn.
+    buds_page: BudsPage,
+    buds_page_pending: Option<BudsPage>,
+    /// What the Buds said about themselves since they connected.
+    buds_health: Option<Health>,
+    buds_firmware: Option<String>,
+    buds_capacity: Option<u16>,
+    /// When the open Buds card last asked for their health (ms).
+    buds_health_asked: u64,
+    buds_find: FindState,
+    buds_drain: Drain,
+    /// The paired Buds' address and whether they're connected to this PC (the worker's).
+    buds_address: Option<String>,
+    buds_linked: bool,
+    /// The offer to connect them (the case opened), and when the last one came.
+    buds_offer: Option<Offer>,
+    buds_offer_last: Option<u64>,
+    /// Listens for the case while they're away.
+    nearby: NearbyWorker,
     /// A noise control switch made on the Buds or the phone: the mode and when (ms).
     buds_mode_moment: Option<(NoiseControl, u64)>,
     /// The media card's pin: it stays open (no closing on leave or a click outside).
@@ -743,7 +774,7 @@ pub struct App {
     alert_watch: AlertWatch,
     alerts: std::collections::VecDeque<Alert>,
     alert_moment: Option<(Alert, u64)>,
-    /// What other programs sent (`nowbar.exe push`, Claude Code's hooks, apps through the API).
+    /// What other programs sent (`pebbly.exe push`, Claude Code's hooks, apps through the API).
     live: LiveSet,
     /// The API: its listener while it is on, what it hands over, and the prompts, waiting
     /// requests and clicks.
@@ -894,14 +925,15 @@ impl App {
             }
             post_media();
         });
-        let buds_mailbox: std::sync::Arc<std::sync::Mutex<Option<Option<BudsSnapshot>>>> = Default::default();
-        let mailbox = buds_mailbox.clone();
-        let buds_worker = BudsWorker::start(move |reading| {
+        let buds_news: std::sync::Arc<std::sync::Mutex<Vec<BudsNews>>> = Default::default();
+        let mailbox = buds_news.clone();
+        let buds_worker = BudsWorker::start(move |news| {
             if let Ok(mut slot) = mailbox.lock() {
-                *slot = Some(reading);
+                slot.push(news);
             }
             post_buds();
         });
+        let nearby = buds_offer::nearby_worker(buds_news.clone());
         crate::platform::settings_watch::start();
         let matches_mailbox: std::sync::Arc<std::sync::Mutex<Option<Vec<MatchSnapshot>>>> = Default::default();
         let mailbox = matches_mailbox.clone();
@@ -945,8 +977,22 @@ impl App {
             media_mailbox,
             swipe: Swipe::default(),
             buds: None,
-            buds_mailbox,
+            buds_news,
             buds_worker,
+            buds_fit: FitTest::Idle,
+            buds_page: BudsPage::Home,
+            buds_page_pending: None,
+            buds_health: None,
+            buds_firmware: None,
+            buds_capacity: None,
+            buds_health_asked: 0,
+            buds_find: FindState::default(),
+            buds_drain: Drain::default(),
+            buds_address: None,
+            buds_linked: false,
+            buds_offer: None,
+            buds_offer_last: None,
+            nearby,
             buds_mode_moment: None,
             buds_mode_sent: None,
             ear_pause: None,
@@ -1124,6 +1170,7 @@ impl App {
         }
         self.leave_question();
         self.leave_output_page();
+        self.leave_buds_card();
         self.ui.card_window.hide();
         self.ui.pill.set_opacity(1.0)?;
         self.card_state = CardState::Closed;
@@ -1349,6 +1396,9 @@ impl App {
                 None => Presence { kind: ActivityKind::Buds, state: PresenceState::Connected { battery_low: is_low(b) }, changed_ms: *connected_ms },
             };
             p.push(presence);
+        } else if s.buds_enabled && self.buds_offer.and_then(|o| o.at(now)).is_some() {
+            // The case opened: the offer waits for an answer at the front.
+            p.push(Presence { kind: ActivityKind::Buds, state: PresenceState::Waiting, changed_ms: self.buds_offer_last.unwrap_or(now) });
         }
         // Matches: changed_ms stays 0 so a kick-off or a goal never overrides the user's pick
         // (moments jump ahead on their own while they play); earliest kick-off first.
@@ -1369,7 +1419,7 @@ impl App {
         p
     }
 
-    /// The followed matches the Now Bar shows now (settings: on, the window around kick-off,
+    /// The followed matches Pebbly shows now (settings: on, the window around kick-off,
     /// not hidden from the menu).
     fn shown_matches(&self, _now: u64) -> Vec<&MatchSnapshot> {
         let s = settings::current();
@@ -1695,7 +1745,7 @@ impl App {
             }),
             ActivityKind::Buds => match self.buds_mode_moment.filter(|(_, at)| now.saturating_sub(*at) < BUDS_MODE_MOMENT_MS) {
                 Some((mode, _)) => Some(PillContent::BudsMode(mode)),
-                None => self.buds.map(|(b, _)| PillContent::Buds(shown_buds(b))),
+                None => self.buds.map(|(b, _)| PillContent::Buds(shown_buds(b))).or_else(|| self.offer_pill(now)),
             },
             ActivityKind::Match(key) => self.match_of(key).map(|m| PillContent::Match(Box::new(self.match_pill(m, now)))),
             ActivityKind::Volume => self.volume_moment.map(|(pct, muted, _)| PillContent::Volume { pct, muted }),
@@ -1788,7 +1838,7 @@ impl App {
                 }
                 CardContent::Media(Box::new(card))
             }),
-            OpenCard::Activity(ActivityKind::Buds) => self.buds.map(|(b, _)| CardContent::Buds(shown_buds(b))),
+            OpenCard::Activity(ActivityKind::Buds) => self.buds.map(|(b, _)| CardContent::Buds(self.buds_card(b, self.buds_page, now))).or_else(|| self.offer_card(now)),
             OpenCard::Activity(ActivityKind::Match(key)) => self.match_of(key).map(|m| CardContent::Match(Box::new(self.match_card(m, now)))),
             // A moment has no card.
             OpenCard::Activity(
@@ -2026,7 +2076,7 @@ impl App {
     }
 
     /// The card's answer to the permission its Claude session waits for: to the hook process
-    /// (its NowBarAsk window); if that is gone, Claude's own dialog has it.
+    /// (its PebblyAsk window); if that is gone, Claude's own dialog has it.
     fn answer_claude(&mut self, allow: bool, painted: u32) {
         let Some(OpenCard::Activity(ActivityKind::Live(key))) = self.open else { return };
         let Some(ask) = self.live.get(key).and_then(|i| i.info.ask.clone()).filter(|a| !a.id.is_empty()) else { return };
@@ -2302,6 +2352,8 @@ impl App {
     fn refresh(&mut self) -> Result<()> {
         let now = now_ms();
         self.follow_taskbar_items();
+        self.tick_buds(now);
+        self.tick_offer(now);
         for id in self.live.waiting_asks() {
             let title = HSTRING::from(id.as_str());
             if unsafe { windows::Win32::UI::WindowsAndMessaging::FindWindowW(crate::platform::ask::ASK_CLASS, windows::core::PCWSTR(title.as_ptr())) }.is_err() {
@@ -2381,7 +2433,7 @@ impl App {
         if let (Some(open), CardState::Opening | CardState::Open) = (self.open, self.card_state) {
             match self.card_content(open, now) {
                 Some(content) => {
-                    if self.card_state == CardState::Open && self.switch_pending.is_none() {
+                    if self.card_state == CardState::Open && self.switch_pending.is_none() && self.buds_page_pending.is_none() {
                         self.fit_open_card(&content)?;
                     }
                     self.ui.card.set(&self.gfx, &content, &self.ui.card_scale)?;
@@ -2550,6 +2602,12 @@ impl App {
             if age < BUDS_MODE_MOMENT_MS {
                 sooner(BUDS_MODE_MOMENT_MS - age + 5);
             }
+        }
+        if let Some(ms) = self.buds_wake_in(now) {
+            sooner(ms);
+        }
+        if let Some(ms) = self.offer_wake_in(now) {
+            sooner(ms);
         }
         // A new lyric line moving into place: repaint each frame until it lands.
         if let (Some(OpenCard::Activity(ActivityKind::Media(id))), true) = (self.open, self.show_lyrics) {
@@ -2878,6 +2936,19 @@ impl App {
                     self.buds_worker.set_noise(mode);
                 }
             }
+            CardAction::BudsTouch
+            | CardAction::BudsHold(_)
+            | CardAction::BudsFit
+            | CardAction::BudsPage(_)
+            | CardAction::BudsBack
+            | CardAction::BudsEq(_)
+            | CardAction::BudsAmbient(_)
+            | CardAction::BudsCustom(_)
+            | CardAction::BudsToggle(..)
+            | CardAction::BudsFind
+            | CardAction::BudsMute(_)
+            | CardAction::BudsPc(_) => return self.buds_act(action),
+            CardAction::BudsConnect | CardAction::BudsDismiss | CardAction::BudsDisconnect => return self.offer_act(action),
             CardAction::ShelfRemove(i) => {
                 self.shelf.remove(i);
                 self.shelf_hover = None;
@@ -2906,7 +2977,7 @@ impl App {
         self.refresh()
     }
 
-    /// Takes the football worker's matches (drawn in the Now Bar by the match activity).
+    /// Takes the football worker's matches (drawn in Pebbly by the match activity).
     fn take_matches(&mut self) -> Result<()> {
         let football = self.matches_mailbox.lock().ok().and_then(|mut slot| slot.take());
         let games = self.games_mailbox.lock().ok().and_then(|mut slot| slot.take());
@@ -2966,33 +3037,6 @@ impl App {
         Ok(())
     }
 
-    /// Takes the Buds worker's latest reading; a first reading marks the moment they connected.
-    fn take_buds(&mut self) -> Result<()> {
-        let fresh = self.buds_mailbox.lock().ok().and_then(|mut slot| slot.take());
-        if let Some(reading) = fresh {
-            let connected_ms = self.buds.map_or_else(now_ms, |(_, at)| at);
-            let before = self.buds.and_then(|(b, _)| b.noise);
-            let now = now_ms();
-            if let Some(mode) = reading.and_then(|b| b.noise).filter(|m| before.is_some_and(|b| b != *m)) {
-                // Switched on the Buds or the phone (the card's own switch echoes back): a moment,
-                // unless the card is open on the Buds.
-                let echo = self.buds_mode_sent.is_some_and(|(sent, at)| sent == mode && now.saturating_sub(at) < 5000);
-                if !echo && self.open != Some(OpenCard::Activity(ActivityKind::Buds)) {
-                    self.buds_mode_moment = Some((mode, now));
-                }
-            }
-            if let (Some((old, _)), Some(new)) = (self.buds, reading) {
-                if old.worn != new.worn {
-                    log(&format!("buds: worn L {} R {} (was L {} R {})", new.worn.left, new.worn.right, old.worn.left, old.worn.right));
-                    self.follow_ears(old.worn, new.worn, now);
-                }
-            }
-            self.buds = reading.map(|b| (b, connected_ms));
-            self.refresh()?;
-        }
-        Ok(())
-    }
-
     /// What the updater found or did.
     fn take_update(&mut self) -> Result<()> {
         let news = self.update_mailbox.lock().map(|mut m| std::mem::take(&mut *m)).unwrap_or_default();
@@ -3000,7 +3044,7 @@ impl App {
             match p {
                 Progress::Found(s) => self.update_ready = newer(&s.latest, VERSION).then_some(s),
                 Progress::Installed => {
-                    // main starts the new Now Bar once this loop is over (restart_after_update).
+                    // main starts the new Pebbly once this loop is over (restart_after_update).
                     unsafe { PostQuitMessage(0) };
                 }
                 Progress::Failed(why) => log(&format!("update: {why}")),
@@ -3009,7 +3053,7 @@ impl App {
         Ok(())
     }
 
-    /// The API listens while the Now Bar and the API are both on; off, it closes the port and
+    /// The API listens while Pebbly and the API are both on; off, it closes the port and
     /// whatever waits hears so.
     fn follow_api(&mut self) {
         let s = settings::current();
@@ -3129,7 +3173,7 @@ impl App {
         }
     }
 
-    /// Commands from `nowbar.exe push` and the like.
+    /// Commands from `pebbly.exe push` and the like.
     fn take_ipc(&mut self) -> Result<()> {
         let now = now_ms();
         let before = self.live_states();
@@ -3814,6 +3858,7 @@ impl App {
         let which = OpenCard::Activity(kind);
         let Some(new) = self.card_content(which, now) else { return Ok(()) };
         self.leave_output_page();
+        self.leave_buds_card();
         let s = self.ui.card_scale;
         let old_size = self.open.and_then(|o| self.card_content(o, now)).map(|c| card_size_dip(&c));
         let (wd, hd) = card_size_dip(&new);
@@ -3970,6 +4015,7 @@ impl App {
         self.card_hover = false;
         self.leave_question();
         self.leave_output_page();
+        self.leave_buds_card();
         self.ui.card_window.hide_hit();
         // Into the pill as it is now (after a resize the shape's start is the previous card).
         self.stop_brief_idle();
@@ -4114,11 +4160,13 @@ impl App {
                 self.refresh()
             }
             UiEvent::Timer(TIMER_BRIEF_WAIT) => self.brief_wait_tick(),
+            UiEvent::Timer(TIMER_BUDS_OFFER) => self.offer_buds(),
             UiEvent::Timer(TIMER_BRIEF_IDLE) => {
                 unsafe {
                     let _ = KillTimer(Some(self.main.hwnd), TIMER_BRIEF_IDLE);
                 }
-                if self.brief_auto && self.open == Some(OpenCard::Brief) && !self.card_hover && !self.pill_hover {
+                // The morning brief, or the Buds offer, that opened by itself.
+                if self.brief_auto && matches!(self.open, Some(OpenCard::Brief | OpenCard::Activity(ActivityKind::Buds))) && !self.card_hover && !self.pill_hover {
                     self.close_card()
                 } else {
                     Ok(())
@@ -4258,9 +4306,10 @@ impl App {
                 unsafe {
                     let _ = KillTimer(Some(self.ui.card_window.timer_owner()), TIMER_PAGE);
                 }
-                match self.switch_pending.take() {
-                    Some(kind) => self.apply_switch(kind),
-                    None => self.apply_page(),
+                match (self.switch_pending.take(), self.buds_page_pending.take()) {
+                    (Some(kind), _) => self.apply_switch(kind),
+                    (None, Some(page)) => self.apply_buds_page(page),
+                    (None, None) => self.apply_page(),
                 }
             }
             UiEvent::Timer(TIMER_SWITCH) => {
@@ -4567,7 +4616,7 @@ mod tests {
         let (w, h) = card_size_dip(&CardContent::Brief(Box::new(full.clone())));
         assert!(w <= CARD_FRAME_W_DIP && h <= CARD_FRAME_H_DIP, "a full brief is {w}×{h}");
         // The away row takes the screen time's place.
-        let back = BriefCard { screen: None, away: Some(("Sen yokken · 4 şey".into(), "Claude bitti · now-bar".into())), ..full };
+        let back = BriefCard { screen: None, away: Some(("Sen yokken · 4 şey".into(), "Claude bitti · pebbly".into())), ..full };
         assert_eq!(card_size_dip(&CardContent::Brief(Box::new(back))).1, h);
         let row = || AwayRow { kind: AwayKind::Timer, text: "Zamanlayıcı bitti".into(), time: "17:05".into(), crest: None };
         let card = AwayCard { span: "14:02 – 17:14 · 3 sa 12 dk".into(), rows: (0..away::CARD_ROWS).map(|_| row()).collect(), more: 14 };

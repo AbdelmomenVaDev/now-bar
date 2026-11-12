@@ -1,5 +1,5 @@
 //! The update thread: asks GitHub for the latest release once a day, and on demand downloads it,
-//! checks the exes against SHA256SUMS.txt, swaps them in and starts the new Now Bar.
+//! checks the exes against SHA256SUMS.txt, swaps them in and starts the new Pebbly.
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
@@ -13,14 +13,14 @@ use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
 use super::http::get_bytes;
 use super::log::{log, log_path};
-use crate::update::{is_newer, latest_url, parse_release, parse_sums, rollback, swap_plan, Release, UpdateState, ASSETS, REPO};
+use crate::update::{is_newer, latest_url, parse_release, parse_sums, rollback, swap_plan, Outcome, Release, UpdateState, ASSETS, REPO};
 
 /// The running version.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// The first ask waits for the start to settle; then one a day (GitHub allows 60 an hour).
 const FIRST: Duration = Duration::from_secs(60);
 const EVERY: Duration = Duration::from_secs(24 * 3600);
-const EXES: [&str; 2] = ["nowbar.exe", "nowbar-settings.exe"];
+const EXES: [&str; 2] = ["pebbly.exe", "pebbly-settings.exe"];
 
 /// What the thread tells the app.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -58,38 +58,36 @@ impl Updater {
                     post();
                 };
                 let mut enabled = crate::settings::current().update_check;
-                let mut found: Option<Release> = None;
                 let mut next = Instant::now() + FIRST;
+                // Swapped in, the restart under way: another ask would download again and rename
+                // over the exe still running as pebbly.old.exe.
+                let mut installed = false;
                 loop {
-                    match rx.recv_timeout(next.saturating_duration_since(Instant::now())) {
+                    let result = match rx.recv_timeout(next.saturating_duration_since(Instant::now())) {
                         Ok(Msg::Enable(on)) => {
                             if on && !enabled {
                                 next = Instant::now() + FIRST;
                             }
                             enabled = on;
+                            continue;
                         }
-                        Ok(Msg::Apply) => {
-                            if found.is_none() {
-                                found = check().map(|(r, _)| r);
-                            }
-                            let result = match found.as_ref().filter(|r| is_newer(r, VERSION)) {
-                                Some(r) => download(r).and_then(|dir| install(&dir, &r.page)),
-                                None => Err("no newer release".into()),
-                            };
-                            report(result.map_or_else(Progress::Failed, |()| Progress::Installed));
-                        }
-                        Ok(Msg::ApplyFrom(dir)) => report(verify(&dir).and_then(|()| install(&dir, "")).map_or_else(Progress::Failed, |()| Progress::Installed)),
+                        Ok(Msg::Apply | Msg::ApplyFrom(_)) if installed => continue,
+                        Ok(Msg::Apply) => apply(&report),
+                        Ok(Msg::ApplyFrom(dir)) => verify(&dir).and_then(|()| install(&dir, "")),
                         Err(RecvTimeoutError::Timeout) => {
                             if enabled && !REPO.is_empty() {
-                                if let Some((r, state)) = check() {
-                                    found = Some(r);
+                                if let Some((_, state)) = check() {
                                     report(Progress::Found(state));
                                 }
                             }
                             next = Instant::now() + EVERY;
+                            continue;
                         }
                         Err(RecvTimeoutError::Disconnected) => return,
-                    }
+                    };
+                    installed = result.is_ok();
+                    record(result.as_ref().map_or_else(|(o, _)| *o, |()| Outcome::Installed));
+                    report(result.map_or_else(|(_, why)| Progress::Failed(why), |()| Progress::Installed));
                 }
             })
             .expect("spawn update thread");
@@ -111,7 +109,7 @@ impl Updater {
     }
 }
 
-/// `%LOCALAPPDATA%\NowBar\update.json`.
+/// `%LOCALAPPDATA%\Pebbly\update.json`.
 fn state_path() -> PathBuf {
     log_path().with_file_name("update.json")
 }
@@ -125,8 +123,23 @@ fn unix_now() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
 }
 
-/// Asks GitHub for the latest release and keeps the answer in update.json.
-fn check() -> Option<(Release, UpdateState)> {
+/// Writes update.json whole (the settings window reads it twice a second while it waits).
+fn write_state(state: &UpdateState) {
+    let (path, tmp) = (state_path(), state_path().with_extension("json.tmp"));
+    if std::fs::write(&tmp, serde_json::to_vec(state).unwrap_or_default()).is_ok() {
+        let _ = std::fs::rename(&tmp, &path);
+    }
+}
+
+/// Keeps how the install asked for ended in update.json, for the settings window that asked.
+fn record(outcome: Outcome) {
+    let ended_ms = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64);
+    write_state(&UpdateState { ended_ms, outcome: Some(outcome), ..state().unwrap_or_default() });
+}
+
+/// Asks GitHub for the latest release and keeps the answer in update.json (the settings window's
+/// "Denetle" asks too).
+pub fn check() -> Option<(Release, UpdateState)> {
     let (status, body) = get_bytes(&latest_url(REPO), &[("Accept", "application/vnd.github+json")])
         .inspect_err(|e| log(&format!("update: {e}")))
         .ok()?;
@@ -136,23 +149,39 @@ fn check() -> Option<(Release, UpdateState)> {
     }
     let r = parse_release(&serde_json::from_slice(&body).ok()?)?;
     let (a, b, c) = r.version;
-    let state = UpdateState { latest: format!("{a}.{b}.{c}"), page: r.page.clone(), checked: unix_now() };
-    let _ = std::fs::write(state_path(), serde_json::to_vec(&state).unwrap_or_default());
+    let state = UpdateState { latest: format!("{a}.{b}.{c}"), page: r.page.clone(), checked: unix_now(), ..state().unwrap_or_default() };
+    write_state(&state);
     log(&format!("update: latest {} (running {VERSION})", r.tag));
     Some((r, state))
 }
 
-/// The release's files into `%LOCALAPPDATA%\NowBar\update\<tag>\`, checked.
-fn download(r: &Release) -> Result<PathBuf, String> {
+/// A failed step: what the settings window says, and what the log says.
+type Failed = (Outcome, String);
+
+/// Asks GitHub again (what the daily check found may be a release behind by now), then downloads,
+/// checks and swaps in the latest.
+fn apply(report: &impl Fn(Progress)) -> Result<(), Failed> {
+    let (r, state) = check().ok_or((Outcome::Unreachable, "GitHub didn't answer with a release".to_string()))?;
+    report(Progress::Found(state));
+    if !is_newer(&r, VERSION) {
+        return Err((Outcome::Current, "no newer release".into()));
+    }
+    let dir = download(&r)?;
+    install(&dir, &r.page)
+}
+
+/// The release's files into `%LOCALAPPDATA%\Pebbly\update\<tag>\`, checked.
+fn download(r: &Release) -> Result<PathBuf, Failed> {
+    let failed = |why: String| (Outcome::Download, why);
     let dir = log_path().with_file_name("update").join(&r.tag);
-    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    std::fs::create_dir_all(&dir).map_err(|e| failed(format!("{}: {e}", dir.display())))?;
     for name in ASSETS {
-        let url = r.asset(name).ok_or(format!("{} has no {name}", r.tag))?;
-        let (status, bytes) = get_bytes(url, &[])?;
+        let url = r.asset(name).ok_or_else(|| failed(format!("{} has no {name}", r.tag)))?;
+        let (status, bytes) = get_bytes(url, &[]).map_err(failed)?;
         if status != 200 {
-            return Err(format!("{name}: HTTP {status}"));
+            return Err(failed(format!("{name}: HTTP {status}")));
         }
-        std::fs::write(dir.join(name), bytes).map_err(|e| format!("{name}: {e}"))?;
+        std::fs::write(dir.join(name), bytes).map_err(|e| failed(format!("{name}: {e}")))?;
     }
     verify(&dir).inspect_err(|_| {
         let _ = std::fs::remove_dir_all(&dir);
@@ -161,13 +190,14 @@ fn download(r: &Release) -> Result<PathBuf, String> {
 }
 
 /// Both exes in `dir` match its SHA256SUMS.txt.
-fn verify(dir: &Path) -> Result<(), String> {
-    let sums = parse_sums(&std::fs::read_to_string(dir.join("SHA256SUMS.txt")).map_err(|e| format!("SHA256SUMS.txt: {e}"))?);
+fn verify(dir: &Path) -> Result<(), Failed> {
+    let failed = |why: String| (Outcome::Checksum, why);
+    let sums = parse_sums(&std::fs::read_to_string(dir.join("SHA256SUMS.txt")).map_err(|e| failed(format!("SHA256SUMS.txt: {e}")))?);
     for exe in EXES {
-        let want = sums.iter().find(|(n, _)| n == exe).map(|(_, h)| h).ok_or(format!("{exe} isn't in SHA256SUMS.txt"))?;
-        let got = sha256_hex(&std::fs::read(dir.join(exe)).map_err(|e| format!("{exe}: {e}"))?);
+        let want = sums.iter().find(|(n, _)| n == exe).map(|(_, h)| h).ok_or_else(|| failed(format!("{exe} isn't in SHA256SUMS.txt")))?;
+        let got = sha256_hex(&std::fs::read(dir.join(exe)).map_err(|e| failed(format!("{exe}: {e}")))?);
         if &got != want {
-            return Err(format!("{exe}: checksum {got}, expected {want}"));
+            return Err(failed(format!("{exe}: checksum {got}, expected {want}")));
         }
     }
     Ok(())
@@ -184,12 +214,12 @@ type Renames = Vec<(PathBuf, PathBuf)>;
 /// A swap waiting for the app to quit: the folder and the renames, to undo if the new exe dies.
 static PENDING: Mutex<Option<(PathBuf, Renames)>> = Mutex::new(None);
 
-/// Swaps the exes in the running one's folder for those in `staged`; the new Now Bar starts once
+/// Swaps the exes in the running one's folder for those in `staged`; the new Pebbly starts once
 /// this one has quit (`restart_after_update`). A folder it may not write (Program Files) opens
 /// `page` instead.
-fn install(staged: &Path, page: &str) -> Result<(), String> {
-    let exe = std::env::current_exe().map_err(|e| format!("current exe: {e}"))?;
-    let dir = exe.parent().ok_or("the exe has no folder")?;
+fn install(staged: &Path, page: &str) -> Result<(), Failed> {
+    let exe = std::env::current_exe().map_err(|e| (Outcome::Swap, format!("current exe: {e}")))?;
+    let dir = exe.parent().ok_or((Outcome::Swap, "the exe has no folder".to_string()))?;
     match swap(dir, staged) {
         Ok(done) => {
             if let Ok(mut p) = PENDING.lock() {
@@ -204,7 +234,7 @@ fn install(staged: &Path, page: &str) -> Result<(), String> {
                     ShellExecuteW(None, w!("open"), &HSTRING::from(page), None, None, SW_SHOWNORMAL);
                 }
             }
-            Err(format!("{step}: {e}"))
+            Err((Outcome::Swap, format!("{step}: {e}")))
         }
     }
 }
@@ -216,14 +246,15 @@ fn undo(done: &[(PathBuf, PathBuf)]) {
 }
 
 /// After the message loop of an update's quit (main calls it, still holding the mutex): starts the
-/// new Now Bar and watches it 2 s. One that dies at once (blocked, broken) gets the old exes put
-/// back, and the old Now Bar starts again in its place: never no Now Bar at all.
+/// new Pebbly and watches it 2 s. One that dies at once (blocked, broken) gets the old exes put
+/// back, and the old Pebbly starts again in its place: never no Pebbly at all.
 pub fn restart_after_update() {
     let Some((dir, done)) = PENDING.lock().ok().and_then(|mut p| p.take()) else { return };
-    let exe = dir.join("nowbar.exe");
+    let exe = dir.join("pebbly.exe");
     if !start_and_watch(&exe, &["--after-update"], Duration::from_secs(2)) {
-        log("update: the new Now Bar died at start; the old exes are back");
+        log("update: the new Pebbly died at start; the old exes are back");
         undo(&done);
+        record(Outcome::Reverted);
         let _ = std::process::Command::new(&exe).arg("--after-update").spawn();
     }
 }
@@ -262,7 +293,7 @@ fn start_and_watch(exe: &Path, args: &[&str], watch: Duration) -> bool {
 /// The old exes a swap left beside the new ones (one may still be open: next time, then).
 pub fn cleanup_old() {
     let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf)) else { return };
-    for old in ["nowbar.old.exe", "nowbar-settings.old.exe"] {
+    for old in ["pebbly.old.exe", "pebbly-settings.old.exe"] {
         let _ = std::fs::remove_file(dir.join(old));
     }
 }
@@ -289,7 +320,7 @@ mod tests {
 
     /// A fresh folder under the temp dir with `files` (name, contents).
     fn folder(name: &str, files: &[(&str, &str)]) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("nowbar-test-{name}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("pebbly-test-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         for (f, text) in files {
@@ -304,25 +335,25 @@ mod tests {
 
     #[test]
     fn swap_puts_the_new_exes_in_and_the_old_aside() {
-        let app = folder("app", &[("nowbar.exe", "old"), ("nowbar-settings.exe", "old settings")]);
-        let staged = folder("staged", &[("nowbar.exe", "new"), ("nowbar-settings.exe", "new settings")]);
+        let app = folder("app", &[("pebbly.exe", "old"), ("pebbly-settings.exe", "old settings")]);
+        let staged = folder("staged", &[("pebbly.exe", "new"), ("pebbly-settings.exe", "new settings")]);
         assert!(swap(&app, &staged).is_ok());
-        assert_eq!((read(app.join("nowbar.exe")), read(app.join("nowbar-settings.exe"))), ("new".into(), "new settings".into()));
-        assert_eq!(read(app.join("nowbar.old.exe")), "old");
+        assert_eq!((read(app.join("pebbly.exe")), read(app.join("pebbly-settings.exe"))), ("new".into(), "new settings".into()));
+        assert_eq!(read(app.join("pebbly.old.exe")), "old");
         let _ = (std::fs::remove_dir_all(&app), std::fs::remove_dir_all(&staged));
     }
 
     #[test]
     fn a_locked_exe_leaves_the_old_ones_in_place() {
         use std::os::windows::fs::OpenOptionsExt;
-        let app = folder("locked", &[("nowbar.exe", "old"), ("nowbar-settings.exe", "old settings")]);
-        let staged = folder("locked-staged", &[("nowbar.exe", "new"), ("nowbar-settings.exe", "new settings")]);
+        let app = folder("locked", &[("pebbly.exe", "old"), ("pebbly-settings.exe", "old settings")]);
+        let staged = folder("locked-staged", &[("pebbly.exe", "new"), ("pebbly-settings.exe", "new settings")]);
         // An open settings window of an older build: no sharing, so it can't be renamed.
-        let lock = std::fs::OpenOptions::new().read(true).share_mode(0).open(app.join("nowbar-settings.exe")).unwrap();
+        let lock = std::fs::OpenOptions::new().read(true).share_mode(0).open(app.join("pebbly-settings.exe")).unwrap();
         assert!(swap(&app, &staged).is_err());
         drop(lock);
-        assert_eq!((read(app.join("nowbar.exe")), read(app.join("nowbar-settings.exe"))), ("old".into(), "old settings".into()), "rolled back");
-        assert!(!app.join("nowbar.old.exe").exists());
+        assert_eq!((read(app.join("pebbly.exe")), read(app.join("pebbly-settings.exe"))), ("old".into(), "old settings".into()), "rolled back");
+        assert!(!app.join("pebbly.old.exe").exists());
         let _ = (std::fs::remove_dir_all(&app), std::fs::remove_dir_all(&staged));
     }
 
@@ -335,12 +366,26 @@ mod tests {
     }
 
     /// Checks a release folder the way an update will (BCrypt against its SHA256SUMS.txt), before
-    /// publishing it: `NOWBAR_DIST=<repo>\dist cargo test --lib verify_dist -- --ignored`.
+    /// publishing it: `PEBBLY_DIST=<repo>\dist cargo test --lib verify_dist -- --ignored`.
     #[test]
     #[ignore]
     fn verify_dist() {
-        let dir = std::env::var("NOWBAR_DIST").expect("NOWBAR_DIST=<folder>");
+        let dir = std::env::var("PEBBLY_DIST").expect("PEBBLY_DIST=<folder>");
         verify(Path::new(&dir)).unwrap();
+    }
+
+    /// GitHub answers a renamed or moved repository's API with a 301 to `/repositories/<id>/…`,
+    /// and WinHTTP follows it: Now Bar's updater (the same `get_bytes`) still finds the releases
+    /// at nixesty/now-bar once it is nixesty/pebbly, and their download URLs name the new one.
+    /// Asks a repository moved long ago: `cargo t --lib live_github_follows -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn live_github_follows_a_moved_repository() {
+        let (status, body) = get_bytes(&latest_url("rust-analyzer/rust-analyzer"), &[("Accept", "application/vnd.github+json")]).unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        println!("HTTP {status}: {} {}", v["tag_name"], v["html_url"]);
+        assert_eq!(status, 200);
+        assert!(v["html_url"].as_str().is_some_and(|u| u.contains("/rust-lang/rust-analyzer/")));
     }
 
     /// Asks GitHub for real: `cargo test --lib live_github -- --ignored --nocapture`.

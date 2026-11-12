@@ -10,7 +10,7 @@ use windows::Win32::System::Registry::{
 
 const RUN: PCWSTR = w!(r"Software\Microsoft\Windows\CurrentVersion\Run");
 /// The Run value's name.
-pub const NAME: &str = "NowBar";
+pub const NAME: &str = "Pebbly";
 
 pub fn autostart_enabled() -> bool {
     run_value(NAME).is_some()
@@ -48,6 +48,19 @@ pub fn follow_exe() -> Option<String> {
     Some(old)
 }
 
+/// Now Bar's Run value `old` handed to Pebbly's `new`, for `exe`: starting with Windows stays as
+/// the user had it. Whether there was one.
+pub fn adopt_run_value(old: &str, new: &str, exe: &Path) -> bool {
+    if run_value(old).is_none() {
+        return false;
+    }
+    if run_value(new).is_none() {
+        let _ = set_autostart_for(new, exe, true);
+    }
+    let _ = set_autostart_for(old, exe, false);
+    true
+}
+
 pub fn set_autostart(on: bool) -> windows::core::Result<()> {
     let exe = std::env::current_exe().map_err(|_| windows::core::Error::from(windows::Win32::Foundation::E_FAIL))?;
     set_autostart_for(NAME, &exe, on)
@@ -79,10 +92,10 @@ mod tests {
 
     #[test]
     fn run_entry_points_at_this_exe_whatever_the_quotes_and_case() {
-        let exe = Path::new(r"C:\Projects\nowbar\bin\nowbar.exe");
-        assert!(points_at(r#""C:\Projects\nowbar\bin\nowbar.exe""#, exe));
-        assert!(points_at(r"c:\projects\NOWBAR\bin\nowbar.exe", exe));
-        assert!(!points_at(r#""C:\Users\k\AppData\Local\Temp\nbt-app\release\nowbar.exe""#, exe));
-        assert_eq!(run_command(exe), r#""C:\Projects\nowbar\bin\nowbar.exe""#);
+        let exe = Path::new(r"C:\Projects\pebbly\bin\pebbly.exe");
+        assert!(points_at(r#""C:\Projects\pebbly\bin\pebbly.exe""#, exe));
+        assert!(points_at(r"c:\projects\PEBBLY\bin\pebbly.exe", exe));
+        assert!(!points_at(r#""C:\Users\k\AppData\Local\Temp\nbt-app\release\pebbly.exe""#, exe));
+        assert_eq!(run_command(exe), r#""C:\Projects\pebbly\bin\pebbly.exe""#);
     }
 }

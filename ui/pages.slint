@@ -1030,6 +1030,17 @@ export component BudsInspector inherits VerticalLayout {
             }
         }
     }
+    ISection {
+        title: @tr("Bağlantı");
+        IRow {
+            label: @tr("Kutu açılınca bağlanmayı öner");
+            note: @tr("Bağlı değilken pilde sorar");
+            Toggle {
+                checked <=> Store.buds-offer;
+                toggled => { Ui.changed(); }
+            }
+        }
+    }
 }
 
 // ================================================================== 5 Canlı maç
@@ -1326,11 +1337,11 @@ export component AboutBody inherits VerticalLayout {
     Tiles {
         Tile {
             width: parent.tw;
-            title: "Now Bar";
+            title: "Pebbly";
             sub: Store.version;
             selected: true;
             clickable: false;
-            // The Now Bar mark, large: a pill with the accent dot.
+            // Pebbly's mark, large: a pill with the accent dot.
             Rectangle {
                 width: 96px;
                 height: 44px;
@@ -1374,14 +1385,15 @@ export component AboutBody inherits VerticalLayout {
         title: @tr("Güncelleme");
         count: Store.update-check ? @tr("günde bir kez GitHub'dan") : @tr("denetim kapalı");
     }
+    // Installs what was found, else asks GitHub now; the line says what is under way and how it went.
     LRow {
-        title: Store.update-ready ? @tr("Güncelle") : @tr("Sürüm");
+        title: Store.update-ready ? @tr("Güncelle") : @tr("Denetle");
         sub: Store.update-line;
-        clickable: Store.update-ready;
+        clickable: !Store.update-busy;
         lead: 1;
-        glyph: "\u{E896}";
+        glyph: Store.update-ready ? "\u{E896}" : "\u{E895}";
         clicked => { Store.action("update"); }
-        if Store.update-ready: Keycap { key: "↵"; }
+        if !Store.update-busy: Keycap { key: "↵"; }
     }
     H4 {
         title: @tr("Dosyalar");
@@ -1389,7 +1401,7 @@ export component AboutBody inherits VerticalLayout {
     }
     LRow {
         title: @tr("Günlük");
-        sub: "%LOCALAPPDATA%\\NowBar\\log.txt";
+        sub: "%LOCALAPPDATA%\\Pebbly\\log.txt";
         clickable: true;
         lead: 1;
         glyph: "\u{E8A5}";
@@ -1398,7 +1410,7 @@ export component AboutBody inherits VerticalLayout {
     }
     LRow {
         title: @tr("Ayar dosyası");
-        sub: "%APPDATA%\\NowBar\\settings.json";
+        sub: "%APPDATA%\\Pebbly\\settings.json";
         clickable: true;
         lead: 1;
         glyph: "\u{E8A5}";
@@ -1843,7 +1855,7 @@ export component SystemInspector inherits VerticalLayout {
             }
         }
         Text {
-            text: @tr("Açıkken, izin verdiğin uygulamalar pilde bildirim gösterebilir. Hangi uygulamalara izin verdiğin ve gösterdikleri senin sorumluluğunda; Now Bar yalnızca gösterir.");
+            text: @tr("Açıkken, izin verdiğin uygulamalar pilde bildirim gösterebilir. Hangi uygulamalara izin verdiğin ve gösterdikleri senin sorumluluğunda; Pebbly yalnızca gösterir.");
             font-size: 13px;
             color: Theme.text2;
             wrap: word-wrap;

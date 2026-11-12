@@ -1,15 +1,18 @@
 [package]
-name = "nowbar"
-version = "0.4.1"
+name = "pebbly"
+version = "0.5.0"
 edition = "2021"
 license = "GPL-3.0-only"
 publish = false
 
+# The settings window is a path dependency, not a member: the aliases lint every member while
+# they build it, and its one line of Rust is include_modules! over thousands of generated ones.
 [workspace]
-members = ["ui", "setup"]
+members = ["setup"]
+exclude = ["ui"]
 
 [dependencies]
-nowbar-ui = { path = "ui" }
+pebbly-ui = { path = "ui" }
 serde = { version = "1", features = ["derive"] }
 # preserve_order: `claude-hooks` rewrites Claude Code's settings.json in the user's own key order.
 serde_json = { version = "1", features = ["preserve_order"] }
@@ -31,6 +34,7 @@ features = [
   "ApplicationModel",
   "ApplicationModel_DataTransfer",
   "Devices_Bluetooth",
+  "Devices_Bluetooth_Advertisement",
   "Devices_Bluetooth_Rfcomm",
   "Devices_Enumeration",
   "Devices_Geolocation",
@@ -57,6 +61,7 @@ features = [
   "Web_Http",
   "Web_Http_Filters",
   "Web_Http_Headers",
+  "Win32_Devices_DeviceAndDriverInstallation",
   "Win32_Devices_FunctionDiscovery",
   "Win32_Foundation",
   "Win32_Graphics_Direct2D",
@@ -105,6 +110,69 @@ features = [
   "Win32_UI_WindowsAndMessaging",
 ]
 
+# Only the lib and the settings window have tests: a harness for each of the others was one more
+# exe to link on every `cargo t`.
+[[bin]]
+name = "pebbly"
+path = "src/main.rs"
+test = false
+
+[[bin]]
+name = "audioprobe"
+test = false
+
+[[bin]]
+name = "cardsheet"
+test = false
+
+[[bin]]
+name = "copyprobe"
+test = false
+
+[[bin]]
+name = "footballprobe"
+test = false
+
+[[bin]]
+name = "fxsheet"
+test = false
+
+[[bin]]
+name = "glidesheet"
+test = false
+
+[[bin]]
+name = "glyphsheet"
+test = false
+
+[[bin]]
+name = "islandsheet"
+test = false
+
+[[bin]]
+name = "matchsheet"
+test = false
+
+[[bin]]
+name = "mediaprobe"
+test = false
+
+[[bin]]
+name = "pillsheet"
+test = false
+
+[[bin]]
+name = "readmesheet"
+test = false
+
+[[bin]]
+name = "settingsheet"
+test = false
+
+[[bin]]
+name = "taskbarprobe"
+test = false
+
 # Full debug info (gigabytes of PDBs and incremental caches) isn't needed: our own code keeps
 # line tables, so a panic still says where; the dependencies keep none.
 [profile.dev]
@@ -123,17 +191,24 @@ lto = true
 inherits = "release"
 lto = false
 incremental = true
+# No PDBs (a few hundred MB): the panic hook logs the message and where, never a backtrace.
+strip = true
 
 # The settings window's generated code (its bindings and layouts; Slint's runtime and renderer
 # stay optimised) is most of a .slint change's build: measured 2026-10-24, rustc took 270 s on it
 # at opt-level 3, 210 s at 1, 93 s at 0, and an edit after an incremental build 41 s at 0 (182 s
-# at 1: the generated code shifts as a whole). The setup's window is small: no cache.
-[profile.quick.package.nowbar-ui]
-incremental = true
+# at 1: the generated code shifts as a whole). Its cache was 400 MB on disk (twice that after an
+# edit, rustc keeping the old session) of the 2 GB the builds may take: none, a .slint edit pays
+# the full 93 s. The setup's window is small: no cache either.
+[profile.quick.package.pebbly-ui]
+incremental = false
 opt-level = 0
 
-[profile.quick.package.nowbar-setup]
+# In quick the setup only runs its tests and shots (releases are dist): at 3 it took 20 s again on
+# every change to the app it depends on.
+[profile.quick.package.pebbly-setup]
 incremental = false
+opt-level = 0
 
 # The released exes (tools/make-setup.ps1): thin LTO (fat LTO ran this machine out of memory),
 # symbols stripped; the default codegen units (one per crate made the first build 26 minutes for
@@ -147,5 +222,5 @@ strip = true
 opt-level = 3
 
 # The released settings window: its generated code at 1 builds in half the time of 3.
-[profile.dist.package.nowbar-ui]
+[profile.dist.package.pebbly-ui]
 opt-level = 1

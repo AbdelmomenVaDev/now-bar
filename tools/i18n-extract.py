@@ -11,7 +11,7 @@ LANGUAGES = ('en', 'ar')
 
 
 def po_path(code):
-    return os.path.join(ROOT, 'i18n', code, 'LC_MESSAGES', 'nowbar-ui.po')
+    return os.path.join(ROOT, 'i18n', code, 'LC_MESSAGES', 'pebbly-ui.po')
 
 
 

@@ -49,10 +49,16 @@ pub enum Icon {
     Share,
     Copy,
     Shrink,
+    /// The Buds card's rows: a page's chevron, the equalizer, touch, the system page, charging.
+    ChevronRight,
+    Equalizer,
+    Touch,
+    Info,
+    Bolt,
 }
 
 impl Icon {
-    pub const ALL: [Icon; 42] = [
+    pub const ALL: [Icon; 47] = [
         Icon::Play,
         Icon::Pause,
         Icon::Prev,
@@ -95,6 +101,11 @@ impl Icon {
         Icon::Share,
         Icon::Copy,
         Icon::Shrink,
+        Icon::ChevronRight,
+        Icon::Equalizer,
+        Icon::Touch,
+        Icon::Info,
+        Icon::Bolt,
     ];
 }
 
@@ -145,6 +156,11 @@ pub fn glyph(i: Icon) -> char {
         Icon::Copy => '\u{E8C8}',
         // BackToWindow: two arrows coming in.
         Icon::Shrink => '\u{E73F}',
+        Icon::ChevronRight => '\u{E76C}',
+        Icon::Equalizer => '\u{E9E9}',
+        Icon::Touch => '\u{E815}',
+        Icon::Info => '\u{E946}',
+        Icon::Bolt => '\u{E945}',
     }
 }
 
@@ -175,7 +191,7 @@ pub fn mdl2_scale(c: char) -> f32 {
 mod tests {
     use super::*;
 
-    /// Everything the app draws checked in both fonts with `glyphsheet` (`NOWBAR_FONTS=win10`).
+    /// Everything the app draws checked in both fonts with `glyphsheet` (`PEBBLY_FONTS=win10`).
     /// MDL2's batteries (made for a phone's status bar) are 1.31 em wide, charging 1.44 em;
     /// Fluent's 1 em, which the pills are laid out for.
     #[test]

@@ -2,22 +2,24 @@
 //! off-screen, on a taskbar-coloured strip, each with its compact form (the circle) on the
 //! right. Usage: `pillsheet [out.png]`.
 
-use nowbar::render::gfx::{rect, rgba, white, Face, Ink, TextKit, TextStyle, Weight};
-use nowbar::render::layout::Scale;
-use nowbar::activities::buds::{BudsSnapshot, NoiseControl, Worn};
-use nowbar::activities::live::{AppIcon, LiveState};
-use nowbar::render::crest::Crest;
-use nowbar::activities::shelf::FileKind;
-use nowbar::activities::weather::{describe, symbol, WeatherFx};
-use nowbar::activities::weather_alert::AlertKind;
-use nowbar::activities::games::Store;
-use nowbar::render::pill::{paint_media_still, paint_pill_content, PillContent, PillThumb};
-use nowbar::activities::media::{Caps, MediaSnapshot};
-use nowbar::activities::transfer::TransferKind;
+use pebbly::render::gfx::{rect, rgba, white, Face, Ink, TextKit, TextStyle, Weight};
+use pebbly::render::layout::Scale;
+use pebbly::activities::buds::{BudsSnapshot, NoiseControl, Worn};
+use pebbly::activities::live::{AppIcon, LiveState};
+use pebbly::render::crest::Crest;
+use pebbly::activities::shelf::FileKind;
+use pebbly::activities::weather::{describe, symbol, WeatherFx};
+use pebbly::activities::weather_alert::AlertKind;
+use pebbly::activities::games::Store;
+use pebbly::render::pill::{paint_media_still, paint_pill_content, PillContent, PillThumb};
+use pebbly::render::card::bud_art;
+use pebbly::activities::buds_nearby::Offer;
+use pebbly::activities::media::{Caps, MediaSnapshot};
+use pebbly::activities::transfer::TransferKind;
 
 /// Explorer copying, as the app shows it.
 fn transfer(kind: TransferKind, pct: u8, left_s: Option<u64>, done: bool) -> PillContent {
-    PillContent::Transfer { kind, pct, detail: nowbar::activities::transfer::pill_detail(pct, left_s), done }
+    PillContent::Transfer { kind, pct, detail: pebbly::activities::transfer::pill_detail(pct, left_s), done }
 }
 
 /// A playing song (made up); `line`: the lyric on, in the title's place, as the app shows it.
@@ -72,7 +74,7 @@ fn epic(md5: &str) -> String {
 
 fn art(path: &str, s: &Scale) -> Option<Crest> {
     let px = s.px(24.0).round() as u32;
-    nowbar::render::crest::load_cover(std::path::Path::new(path), px, px)
+    pebbly::render::crest::load_cover(std::path::Path::new(path), px, px)
 }
 
 fn game(store: Store, title: &str, line: &str, progress: Option<f32>, art: Option<Crest>, done: bool) -> PillContent {
@@ -96,11 +98,11 @@ fn thumb(s: &Scale, which: usize) -> PillThumb {
 fn main() -> Result<()> {
     // --en: the painters' own words in English (the samples' lines stay as written).
     if std::env::args().any(|a| a == "--en") {
-        nowbar::i18n::set_language(nowbar::i18n::Language::English);
+        pebbly::i18n::set_language(pebbly::i18n::Language::English);
     } else if std::env::args().any(|a| a == "--ar") {
-        nowbar::i18n::set_language(nowbar::i18n::Language::Arabic);
+        pebbly::i18n::set_language(pebbly::i18n::Language::Arabic);
     }
-    let out = std::env::args().skip(1).find(|a| a != "--en" && a != "--ar").unwrap_or_else(|| std::env::temp_dir().join("pillsheet.png").to_string_lossy().into_owned());
+    let out = std::env::args().skip(1).find(|a| a != "--en").unwrap_or_else(|| std::env::temp_dir().join("pillsheet.png").to_string_lossy().into_owned());
     unsafe { CoInitializeEx(None, COINIT_MULTITHREADED).ok()? };
     let s = Scale(1.25);
     let pills: Vec<(&str, PillContent)> = vec![
@@ -134,11 +136,11 @@ fn main() -> Result<()> {
         ("Kopyalama (başta)", transfer(TransferKind::Copy, 3, None, false)),
         ("Silme", transfer(TransferKind::Delete, 80, Some(20), false)),
         ("Kopyalama bitti", transfer(TransferKind::Copy, 100, None, true)),
-        ("Sen yokken", PillContent::Away { count: nowbar::activities::away::count_text(4) }),
-        ("Sen yokken (çok)", PillContent::Away { count: nowbar::activities::away::count_text(12) }),
-        ("Claude çalışıyor", PillContent::Live { key: 1, title: "now-bar".into(), status: "4:12".into(), claude: true, state: LiveState::Run, action: "Düzenliyor: app.rs".into() }),
-        ("Claude izin", PillContent::Live { key: 1, title: "now-bar".into(), status: "İzin istiyor".into(), claude: true, state: LiveState::Wait, action: "Bash".into() }),
-        ("Claude bitti", PillContent::Live { key: 1, title: "now-bar".into(), status: "Bitti".into(), claude: true, state: LiveState::Done, action: String::new() }),
+        ("Sen yokken", PillContent::Away { count: pebbly::activities::away::count_text(4) }),
+        ("Sen yokken (çok)", PillContent::Away { count: pebbly::activities::away::count_text(12) }),
+        ("Claude çalışıyor", PillContent::Live { key: 1, title: "pebbly".into(), status: "4:12".into(), claude: true, state: LiveState::Run, action: "Düzenliyor: app.rs".into() }),
+        ("Claude izin", PillContent::Live { key: 1, title: "pebbly".into(), status: "İzin istiyor".into(), claude: true, state: LiveState::Wait, action: "Bash".into() }),
+        ("Claude bitti", PillContent::Live { key: 1, title: "pebbly".into(), status: "Bitti".into(), claude: true, state: LiveState::Done, action: String::new() }),
         ("push %40", PillContent::Live { key: 2, title: "cargo build".into(), status: "%40".into(), claude: false, state: LiveState::Run, action: String::new() }),
         ("Uzun başlık", PillContent::Live { key: 3, title: "Masaüstü çalışma klasörü yedeği".into(), status: "1:02:05".into(), claude: false, state: LiveState::Run, action: String::new() }),
         ("Uygulama bildirimi", PillContent::App { key: 10, title: "Yedekleme bitti".into(), text: "12 dosya, 48 MB".into(), status: String::new(), icon: None, accent: (0x1D, 0xB9, 0x54), ring: false }),
@@ -152,8 +154,12 @@ fn main() -> Result<()> {
         ("Kulaklık", PillContent::Headset { name: "soundcore H30i".into(), pct: 60 }),
         ("Ekran görüntüsü", PillContent::Capture { thumb: Some(swatch(s.px(36.0) as u32, [0x2F, 0x80, 0xED], [0x8E, 0x2B, 0x5C])), size: "1920×1080".into() }),
         ("Ekran gör. (önizlemesiz)", PillContent::Capture { thumb: None, size: String::new() }),
-        ("Buds", PillContent::Buds(BudsSnapshot { left: 60, right: 70, case: Some(40), noise: None, worn: Worn { left: true, right: true } })),
-        ("Buds (kutusuz)", PillContent::Buds(BudsSnapshot { left: 100, right: 95, case: None, noise: None, worn: Worn::default() })),
+        ("Buds", PillContent::Buds(BudsSnapshot { left: 60, right: 70, case: Some(40), noise: None, worn: Worn { left: true, right: true }, ..Default::default() })),
+        ("Buds (kutusuz)", PillContent::Buds(BudsSnapshot { left: 100, right: 95, case: None, noise: None, worn: Worn::default(), ..Default::default() })),
+        ("Buds teklifi", PillContent::BudsOffer { title: "Galaxy Buds2".into(), offer: Offer::Asking { since: 0 }, art: bud_art(Some(316), 0, s.px(19.0) as u32) }),
+        ("Buds bağlanıyor", PillContent::BudsOffer { title: "Galaxy Buds2".into(), offer: Offer::Connecting { since: 0 }, art: bud_art(Some(316), 0, s.px(19.0) as u32) }),
+        ("Buds bağlandı", PillContent::BudsOffer { title: "Galaxy Buds2".into(), offer: Offer::Connected { at: 0 }, art: bud_art(Some(314), 0, s.px(19.0) as u32) }),
+        ("Buds bağlanamadı", PillContent::BudsOffer { title: "Galaxy Buds2".into(), offer: Offer::Failed { at: 0 }, art: bud_art(Some(340), 0, s.px(19.0) as u32) }),
         ("Buds modu", PillContent::BudsMode(NoiseControl::Anc)),
         ("Buds modu", PillContent::BudsMode(NoiseControl::Ambient)),
         ("Buds modu", PillContent::BudsMode(NoiseControl::Off)),

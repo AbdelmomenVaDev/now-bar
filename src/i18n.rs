@@ -1,5 +1,5 @@
 //! The interface's language. Every string in the code is Turkish (the source); English and Arabic
-//! come from `i18n/{en,ar}/LC_MESSAGES/nowbar-ui.po`, built into tables at compile time. The
+//! come from `i18n/{en,ar}/LC_MESSAGES/pebbly-ui.po`, built into tables at compile time. The
 //! settings window's Slint strings use the same files through Slint's bundled translations.
 
 use std::cell::Cell;
@@ -100,10 +100,10 @@ pub fn pick(p: LanguagePick, windows: Language) -> Language {
     }
 }
 
-/// The language a setting gives on this PC: `NOWBAR_LANG` ("tr", "en" or "ar": the dev sheets and
+/// The language a setting gives on this PC: `PEBBLY_LANG` ("tr", "en" or "ar": the dev sheets and
 /// the setup's shots in any language) first, else [`pick`] with Windows' own.
 pub fn chosen(p: LanguagePick) -> Language {
-    match std::env::var("NOWBAR_LANG").ok().as_deref().and_then(Language::from_code) {
+    match std::env::var("PEBBLY_LANG").ok().as_deref().and_then(Language::from_code) {
         Some(l) => l,
         None => pick(p, windows_language()),
     }

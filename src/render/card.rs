@@ -8,6 +8,9 @@ use windows::Win32::Graphics::Direct2D::Common::D2D_RECT_F;
 use super::gfx::{new_surface, paint_surface, rect, rgba, white, Face, Gfx, Ink, TextStyle, Weight};
 use super::icons::{glyph, Icon};
 use super::layout::Scale;
+
+mod buds;
+pub use buds::{bud_art, buds_pages, BudsCard, BudsPage};
 use super::color::media_gradient;
 use super::pill::{
     alert_style, lighten, paint_app_icon, paint_live_mark, store_accent, timer_accent, BUDS_ACCENT, CLAUDE_ACCENT, CLAUDE_ICON, LOW_ACCENT, RAIN_ACCENT, RAIN_ICON, SNOW_ACCENT, SNOW_ICON,
@@ -19,7 +22,7 @@ use crate::activities::games::Store;
 use crate::activities::weather_alert::AlertKind;
 use crate::activities::claude::StepKind;
 use crate::activities::live::LiveState;
-use crate::activities::buds::{low_battery, percent, BudsSnapshot, NoiseControl};
+use crate::activities::buds::{fit_button, fit_can_press, fit_line, percent, BudsSnapshot, FitTest, HoldAction, NoiseControl};
 use crate::activities::weather::{fx_accent, palette, WeatherFx};
 use crate::activities::football::{EventKind, MatchEvent, Side};
 use crate::platform::audio::{OutputBus, OutputKind};
@@ -81,7 +84,7 @@ impl PickerState {
 
 
 /// The media card: the snapshot, the position to draw (interpolated by the app), the output
-/// device name, a seek preview while the thumb is dragged, and (index, count) of the Now Bar
+/// device name, a seek preview while the thumb is dragged, and (index, count) of Pebbly
 /// items for the page dots.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MediaCard {
@@ -261,7 +264,7 @@ pub enum CardContent {
     Stopwatch(StopwatchCard),
     Picker(PickerState),
     Media(Box<MediaCard>),
-    Buds(BudsSnapshot),
+    Buds(BudsCard),
     Match(Box<MatchCard>),
     Weather(Box<WeatherCard>),
     Shelf(ShelfCard),
@@ -287,7 +290,7 @@ pub struct AwayCard {
 #[derive(Clone, Debug, PartialEq)]
 pub struct AwayRow {
     pub kind: AwayKind,
-    /// "Claude bitti · now-bar"
+    /// "Claude bitti · pebbly"
     pub text: String,
     /// "17:05"
     pub time: String,
@@ -594,7 +597,7 @@ pub struct BriefCard {
     pub music: Option<BriefMusic>,
     /// Dijital Denge's row: ("Ekran süresi · 3 sa 40 dk", "Bugün · VS Code 1 sa 50 dk").
     pub screen: Option<(String, String)>,
-    /// Just back from a lock: ("Sen yokken · 4 şey", "Claude bitti · now-bar").
+    /// Just back from a lock: ("Sen yokken · 4 şey", "Claude bitti · pebbly").
     pub away: Option<(String, String)>,
 }
 
@@ -712,6 +715,32 @@ pub enum CardAction {
     Pin,
     /// A segment of the Buds card's noise control (the mode's byte).
     BudsNoise(u8),
+    /// The Buds card's touch controls switch.
+    BudsTouch,
+    /// A touch and hold choice.
+    BudsHold(HoldAction),
+    /// A home page row: its page; the pages' back chevron.
+    BudsPage(BudsPage),
+    BudsBack,
+    BudsEq(crate::activities::buds_controls::Equalizer),
+    /// The ambient level's stop.
+    BudsAmbient(u8),
+    /// The customised ambient sound as it should become.
+    BudsCustom(crate::activities::buds_controls::AmbientCustom),
+    /// A switch and its new state.
+    BudsToggle(crate::activities::buds_controls::Toggle, bool),
+    /// Find my earbuds' Başlat / Durdur, and a side's mute (0 left).
+    BudsFind,
+    BudsMute(u8),
+    /// What a long press does on the PC.
+    BudsPc(crate::settings::BudsPcAction),
+    /// The offer's Bağlan (and Tekrar dene), Şimdi değil (and Kapat); the Sistem page's
+    /// Bağlantıyı kes.
+    BudsConnect,
+    BudsDismiss,
+    BudsDisconnect,
+    /// The fit test's Başlat / Durdur.
+    BudsFit,
     /// A shelf tile's close button (its index, newest first).
     ShelfRemove(usize),
     /// The shelf card's "Temizle".
@@ -763,9 +792,7 @@ pub fn card_size_dip(c: &CardContent) -> (f32, f32) {
         }
         CardContent::Picker(_) => (370.0, 260.0),
         CardContent::Media(_) => (340.0, 350.0),
-        // The noise control row once the Buds have said their mode.
-        CardContent::Buds(b) if b.noise.is_some() => (370.0, 238.0),
-        CardContent::Buds(_) => (370.0, 150.0),
+        CardContent::Buds(c) => (370.0, buds::buds_height_dip(c)),
         CardContent::Weather(w) if w.alert.is_some() => (370.0, 196.0 + WEATHER_ALERT_ROW),
         CardContent::Weather(_) => (370.0, 196.0),
         CardContent::Brief(b) => (370.0, brief_height_dip(b)),
@@ -984,7 +1011,7 @@ pub fn paint_card(ink: &Ink, c: &CardContent, s: &Scale, w: f32, h: f32) -> Resu
             MediaPage::Player => p.media(t),
             MediaPage::Output(o) => p.output(t, o),
         },
-        CardContent::Buds(b) => p.buds(b),
+        CardContent::Buds(c) => p.buds(c),
         CardContent::Weather(w) => p.weather(w),
         CardContent::Brief(b) => p.brief(b),
         CardContent::Live(l) => p.live(l),
@@ -1629,40 +1656,6 @@ impl Painter<'_, '_> {
         Ok(())
     }
 
-    /// "Galaxy Buds2 / Bu bilgisayara bağlı", then a ring per bud and, while known, the case.
-    fn buds(&mut self, b: &BudsSnapshot) -> Result<()> {
-        let d = |v: f32| v * self.s.0;
-        let (r, g, bl) = BUDS_ACCENT;
-        let circle = d(46.0);
-        let badge = rect(d(15.0), d(15.0), circle, circle);
-        self.ink.rrect(badge, circle / 2.0, rgba(r, g, bl, 1.0))?;
-        self.ink.text(&glyph(Icon::Headphones).to_string(), badge, &TextStyle::new(Face::Icons, Weight::Regular, d(24.0), white(1.0)).centered())?;
-        let title = TextStyle::new(Face::Text, Weight::SemiBold, d(16.0), white(1.0)).top();
-        self.ink.text(crate::activities::buds::model_title(), rect(d(73.0), d(17.0), d(280.0), d(22.0)), &title)?;
-        let sub = TextStyle::new(Face::Text, Weight::Regular, d(13.0), white(0.8)).top();
-        self.ink.text(tr("Bu bilgisayara bağlı"), rect(d(73.0), d(40.0), d(280.0), d(20.0)), &sub)?;
-
-        let mut rings = vec![(tr("Sol"), b.left), (tr("Sağ"), b.right)];
-        if let Some(case) = b.case {
-            rings.push((tr("Kutu"), case));
-        }
-        let (radius, cy, step) = (d(22.0), d(96.0), d(110.0));
-        let n = rings.len() as f32;
-        for (i, (label, value)) in rings.into_iter().enumerate() {
-            let cx = self.w / 2.0 + (i as f32 - (n - 1.0) / 2.0) * step;
-            let fill = if value > 0 && value < low_battery() { rgba(0xFF, 0x5A, 0x4F, 1.0) } else { rgba(r, g, bl, 1.0) };
-            self.ink.ring(cx, cy, radius, d(5.0), value as f32 / 100.0, white(0.14), fill)?;
-            let pct = TextStyle::new(Face::Display, Weight::SemiBold, d(13.0), white(1.0)).tabular().centered();
-            self.ink.text(&percent(value), rect(cx - radius, cy - radius, 2.0 * radius, 2.0 * radius), &pct)?;
-            let st = TextStyle::new(Face::Text, Weight::Regular, d(12.0), white(0.7)).centered();
-            self.ink.text(label, rect(cx - d(40.0), cy + radius + d(6.0), d(80.0), d(16.0)), &st)?;
-        }
-        if let Some(mode) = b.noise {
-            self.noise_control(mode)?;
-        }
-        Ok(())
-    }
-
     /// The city and the weather now on top, the next hours in a row below.
     /// "Raf" with its count and the "Temizle" chip, then the tiles: the preview edge to edge with
     /// the name on a scrim, or the type's colour and glyph; the hovered tile gets a ring and its
@@ -1671,9 +1664,9 @@ impl Painter<'_, '_> {
         let d = |v: f32| v * self.s.0;
         let l = shelf_layout(c.tiles.len(), self.s);
         let title = TextStyle::new(Face::Text, Weight::SemiBold, d(16.0), white(1.0)).top();
-        self.ink.text("Raf", rect(d(20.0), d(18.0), d(120.0), d(22.0)), &title)?;
+        self.ink.text(tr("Raf"), rect(d(20.0), d(18.0), d(120.0), d(22.0)), &title)?;
         let count = TextStyle::new(Face::Text, Weight::Regular, d(16.0), white(0.4)).top();
-        let count_x = d(20.0) + self.ink.measure("Raf", &title)? + d(6.0);
+        let count_x = d(20.0) + self.ink.measure(tr("Raf"), &title)? + d(6.0);
         self.ink.text(&c.tiles.len().to_string(), rect(count_x, d(18.0), d(40.0), d(22.0)), &count)?;
         let chip = l.clear;
         self.ink.rrect(chip, (chip.bottom - chip.top) / 2.0, white(0.09))?;
@@ -2196,28 +2189,6 @@ impl Painter<'_, '_> {
         Ok(())
     }
 
-    /// One UI 8's three modes: Samsung's icons on round buttons with their names under them, the
-    /// current one filled with the Buds' blue (the quick panel's look, in the dark).
-    fn noise_control(&mut self, mode: NoiseControl) -> Result<()> {
-        let d = |v: f32| v * self.s.0;
-        let (r, g, bl) = BUDS_ACCENT;
-        let (size, top, step) = (d(44.0), d(158.0), d(110.0));
-        let n = NoiseControl::ALL.len() as f32;
-        for (i, m) in NoiseControl::ALL.into_iter().enumerate() {
-            let cx = self.w / 2.0 + (i as f32 - (n - 1.0) / 2.0) * step;
-            let button = rect((cx - size / 2.0).round(), top, size, size);
-            let on = m == mode;
-            self.ink.rrect(button, size / 2.0, if on { rgba(r, g, bl, 1.0) } else { white(0.15) })?;
-            // The icon's 24 units are the whole button.
-            self.ink.svg(m.icon(), button, white(if on { 1.0 } else { 0.55 }))?;
-            let label = TextStyle::new(Face::Text, if on { Weight::SemiBold } else { Weight::Regular }, d(12.0), white(if on { 1.0 } else { 0.7 })).centered();
-            let label_box = rect(cx - step / 2.0, top + size + d(6.0), step, d(16.0));
-            self.ink.text(m.label(), label_box, &label)?;
-            self.hits.push((rect(cx - step / 2.0, top, step, label_box.bottom - top), CardAction::BudsNoise(m.byte())));
-        }
-        Ok(())
-    }
-
     /// "Ses çıkışı": back, title and what's playing, Windows' sound settings; the current device
     /// with its volume; then the other devices (three at a time, the rest scroll).
     fn output(&mut self, card: &MediaCard, page: &OutputPage) -> Result<()> {
@@ -2382,7 +2353,7 @@ impl Painter<'_, '_> {
             self.ink.text(label, chip, &st.centered())?;
             self.hits.push((chip, CardAction::Lyrics));
         }
-        // Page dots: one per Now Bar item, the current one solid (scroll or swipe to change).
+        // Page dots: one per Pebbly item, the current one solid (scroll or swipe to change).
         let (page, pages) = card.pages;
         if pages > 1 {
             let (dot, gap) = (d(6.0), d(5.0));
@@ -2579,7 +2550,7 @@ mod tests {
     #[test]
     fn the_away_row_is_the_screen_rows_shape() {
         let h = |b: BriefCard| card_size_dip(&CardContent::Brief(Box::new(b))).1;
-        let back = BriefCard { away: Some(("Sen yokken · 4 şey".into(), "Claude bitti · now-bar".into())), ..brief(false, false, 0, false, false) };
+        let back = BriefCard { away: Some(("Sen yokken · 4 şey".into(), "Claude bitti · pebbly".into())), ..brief(false, false, 0, false, false) };
         assert_eq!(h(back), 84.0 + 68.0);
     }
 
@@ -2759,7 +2730,7 @@ mod tests {
     fn claude(ask: bool, focus: bool) -> ClaudeCard {
         ClaudeCard {
             key: 1,
-            title: "now-bar".into(),
+            title: "pebbly".into(),
             state: if ask { LiveState::Wait } else { LiveState::Run },
             status: "Çalışıyor · 3:12".into(),
             steps: vec![],
@@ -2797,7 +2768,7 @@ mod tests {
     #[test]
     fn output_sublines() {
         use crate::platform::audio::OutputBus;
-        let buds = BudsSnapshot { left: 74, right: 69, case: None, noise: None, worn: Default::default() };
+        let buds = BudsSnapshot { left: 74, right: 69, case: None, noise: None, worn: Default::default(), ..Default::default() };
         assert_eq!(output_subline(OutputBus::Bluetooth, Some(&buds)), "Bluetooth · Sol %74 · Sağ %69");
         assert_eq!(output_subline(OutputBus::Bluetooth, None), "Bluetooth");
         assert_eq!(output_subline(OutputBus::Virtual, None), "Sanal");
